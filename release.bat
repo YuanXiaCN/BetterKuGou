@@ -52,9 +52,32 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo 7. 创建安装包和便携版...
-call npm run dist:win
-if %errorlevel% neq 0 (
+
+echo 7. 请选择打包平台：
+echo   1. 仅 Windows (x64/ia32/arm64)
+echo   2. Windows + Linux
+echo   3. Windows + Linux + macOS (需 macOS 环境)
+set /p platform=请输入选项数字并回车: 
+
+if "%platform%"=="1" (
+    call npm run dist:win
+    set build_result=%errorlevel%
+) else if "%platform%"=="2" (
+    call npm run dist:win
+    if %errorlevel% neq 0 goto build_fail
+    call npm run dist:linux
+    set build_result=%errorlevel%
+) else if "%platform%"=="3" (
+    call npm run dist:all
+    set build_result=%errorlevel%
+) else (
+    echo 选项无效，默认仅打包 Windows。
+    call npm run dist:win
+    set build_result=%errorlevel%
+)
+
+if %build_result% neq 0 (
+    :build_fail
     echo 创建安装包失败！
     pause
     exit /b 1
@@ -64,9 +87,11 @@ echo.
 echo ================================
 echo       发布完成！
 echo ================================
+
 echo 生成的文件在 dist-electron 目录:
-echo - BetterKugou-1.0.0-Setup.exe    (安装包)
-echo - BetterKugou-1.0.0-Portable.exe (便携版)
+echo - Windows: BetterKugou-*.exe (Setup/Portable)
+echo - Linux:   BetterKugou-*.AppImage / *.deb / *.rpm
+echo - macOS:   BetterKugou-*.dmg / *.zip
 echo ================================
 
 echo 按任意键打开输出目录...

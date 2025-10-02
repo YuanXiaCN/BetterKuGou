@@ -18,10 +18,13 @@
     "setup-self-contained": "node scripts/setup-self-contained.js",
     "install-backend-deps": "cd backend && npm install --production",
     "dist": "npm run electron:build",
-    "dist:win": "npm run build && npm run setup-self-contained && electron-builder --win",
-    "dist:portable": "npm run build && npm run setup-self-contained && electron-builder --win portable",
-    "build:win": "npm run build && npm run setup-self-contained && electron-builder --win",
-    "build:self-contained": "npm run build && npm run setup-self-contained && electron-builder --win"
+  "dist:win": "npm run build && npm run setup-self-contained && electron-builder --win --x64 --ia32 --arm64",
+  "dist:linux": "npm run build && npm run setup-self-contained && electron-builder --linux",
+  "dist:mac": "npm run build && npm run setup-self-contained && electron-builder --mac",
+  "dist:all": "npm run dist:win && npm run dist:linux && npm run dist:mac",
+  "dist:portable": "npm run build && npm run setup-self-contained && electron-builder --win portable",
+  "build:win": "npm run build && npm run setup-self-contained && electron-builder --win",
+  "build:self-contained": "npm run build && npm run setup-self-contained && electron-builder --win"
   },
   "build": {
     "appId": "com.betterkugou.app",
@@ -48,16 +51,24 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": ["x64", "ia32", "arm64"]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": ["x64", "ia32", "arm64"]
         }
       ],
       "icon": "public/logo.ico",
       "publisherName": "鸢夏",
       "verifyUpdateCodeSignature": false
+    },
+    "linux": {
+      "target": ["AppImage", "deb", "rpm"],
+      "icon": "public/logo.png"
+    },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "icon": "public/logo.png"
     },
     "nsis": {
       "oneClick": false,

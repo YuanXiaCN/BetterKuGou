@@ -1,0 +1,36 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - run: npm run build
+      - run: npm run setup-self-contained
+      - run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            npm run dist:win
+          elif [ "${{ runner.os }}" = "Linux" ]; then
+            npm run dist:linux
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            npm run dist:mac
+          fi
+        shell: bash
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-electron/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

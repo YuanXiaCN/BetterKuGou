@@ -19,6 +19,11 @@ release
 .webpack
 *.tsbuildinfo
 
+# 忽略 backend 文件夹
+backend/
+# 忽略 resources 文件夹
+resources/
+
 # Electron cache and data
 .cache
 GPUCache
