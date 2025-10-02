@@ -149,27 +149,45 @@ async function downloadFile(url, destination) {
   })
 }
 
-// 解压ZIP文件
+// 解压ZIP文件（使用 Node.js 原生方式，不依赖 PowerShell）
 async function extractZip(zipPath, extractDir) {
-  return new Promise((resolve, reject) => {
-    // 使用PowerShell解压（Windows内置）
-    const command = `powershell -command "Expand-Archive -Path '${zipPath}' -DestinationPath '${extractDir}' -Force"`
-    
-    exec(command, (error, stdout, stderr) => {
-      if (error) {
-        console.error('解压错误:', error)
-        reject(error)
-        return
+  console.log('📦 使用 Node.js 原生解压...')
+  
+  // 动态导入 adm-zip（如果未安装则尝试用原生方式）
+  try {
+    const AdmZip = require('adm-zip')
+    const zip = new AdmZip(zipPath)
+    zip.extractAllTo(extractDir, true)
+    console.log('✅ 解压完成')
+  } catch (error) {
+    // 如果 adm-zip 不可用，尝试用系统命令
+    console.log('⚠️  adm-zip 不可用，尝试系统命令解压...')
+    return new Promise((resolve, reject) => {
+      let command
+      if (platform === 'win32') {
+        // Windows: 使用 tar（Windows 10+ 自带）
+        command = `tar -xf "${zipPath}" -C "${extractDir}"`
+      } else {
+        // Linux/macOS: 使用 unzip
+        command = `unzip -q "${zipPath}" -d "${extractDir}"`
       }
       
-      if (stderr) {
-        console.log('解压警告:', stderr)
-      }
-      
-      console.log('✅ 解压完成')
-      resolve()
+      exec(command, { maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
+        if (error) {
+          console.error('解压错误:', error)
+          reject(error)
+          return
+        }
+        
+        if (stderr) {
+          console.log('解压警告:', stderr)
+        }
+        
+        console.log('✅ 解压完成')
+        resolve()
+      })
     })
-  })
+  }
 }
 
 // 设置后端
