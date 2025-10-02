@@ -1,0 +1,54 @@
+const fs = require('fs')
+const path = require('path')
+
+// 创建一个简单的SVG图标
+const svgIcon = `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea"/>
+      <stop offset="100%" style="stop-color:#764ba2"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- 背景圆角矩形 -->
+  <rect width="256" height="256" rx="32" fill="url(#bg)"/>
+  
+  <!-- 音乐符号 -->
+  <g fill="white" opacity="0.9">
+    <!-- 音符1 -->
+    <circle cx="80" cy="180" r="16"/>
+    <rect x="95" y="100" width="4" height="80"/>
+    <path d="M99 100 Q120 95 140 100 L140 110 Q120 105 99 110 Z"/>
+    
+    <!-- 音符2 -->
+    <circle cx="140" cy="200" r="16"/>
+    <rect x="155" y="120" width="4" height="80"/>
+    <path d="M159 120 Q180 115 200 120 L200 130 Q180 125 159 130 Z"/>
+    
+    <!-- 波形线 -->
+    <path d="M50 128 Q70 118 90 128 T130 128 T170 128 T210 128" 
+          stroke="white" stroke-width="3" fill="none" opacity="0.6"/>
+  </g>
+  
+  <!-- 标题文字 -->
+  <text x="128" y="80" text-anchor="middle" fill="white" 
+        font-family="Arial, sans-serif" font-size="24" font-weight="bold">
+    Better
+  </text>
+  <text x="128" y="105" text-anchor="middle" fill="white" 
+        font-family="Arial, sans-serif" font-size="20">
+    Kugou
+  </text>
+</svg>`
+
+// 保存SVG文件
+fs.writeFileSync(path.join(__dirname, '../public/icon.svg'), svgIcon)
+
+console.log('SVG图标已创建: public/icon.svg')
+console.log('')
+console.log('要创建完整的图标文件，请执行以下步骤：')
+console.log('1. 使用在线工具将 SVG 转换为 ICO 格式')
+console.log('   推荐: https://convertio.co/svg-ico/')
+console.log('2. 将生成的 icon.ico 文件放在 public/ 目录下')
+console.log('3. 或者使用设计软件创建 256x256 的 PNG/ICO 图标')

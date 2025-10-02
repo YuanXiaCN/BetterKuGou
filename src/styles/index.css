@@ -1,0 +1,13 @@
+/* 全局样式入口文件 - 导入所有样式模块 */
+
+/* 1. CSS变量定义 */
+@import './variables.css';
+
+/* 2. 重置样式 */
+@import './reset.css';
+
+/* 3. 混合器/工具类 */
+@import './mixins.css';
+
+/* 4. 组件样式 */
+@import './components.css';
