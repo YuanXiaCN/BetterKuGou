@@ -6,6 +6,10 @@ const { pipeline } = require('stream')
 const { promisify } = require('util')
 const streamPipeline = promisify(pipeline)
 
+
+const os = require('os')
+const platform = os.platform() // 'win32', 'linux', 'darwin'
+
 // Node.js 版本配置
 const NODE_VERSION = '20.18.0' // LTS 版本
 const NODE_PLATFORM = 'win-x64' // Windows 64位
@@ -14,85 +18,86 @@ const NODE_DOWNLOAD_URL = `https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE
 async function downloadAndSetupNodejs() {
   try {
     console.log('🚀 开始创建完全自包含的BetterKugou应用...')
-    console.log('📦 Node.js版本:', NODE_VERSION)
-    console.log('💻 目标平台:', NODE_PLATFORM)
-    
     const projectRoot = path.join(__dirname, '..')
     const resourcesDir = path.join(projectRoot, 'resources')
     const nodeDir = path.join(resourcesDir, 'nodejs')
-    const nodeZipPath = path.join(resourcesDir, `node-v${NODE_VERSION}-${NODE_PLATFORM}.zip`)
-    
-    // 确保资源目录存在
-    await fs.ensureDir(resourcesDir)
-    await fs.ensureDir(nodeDir)
-    
-    // 检查是否已经下载过
-    if (await fs.pathExists(path.join(nodeDir, 'node.exe'))) {
-      console.log('✅ Node.js运行时已存在，跳过下载')
-    } else {
-      console.log('⬇️  正在下载Node.js运行时...')
-      console.log('🔗 下载链接:', NODE_DOWNLOAD_URL)
-      
-      // 下载Node.js
-      await downloadFile(NODE_DOWNLOAD_URL, nodeZipPath)
-      console.log('✅ Node.js下载完成')
-      
-      // 解压Node.js
-      console.log('📂 正在解压Node.js...')
-      await extractZip(nodeZipPath, resourcesDir)
-      
-      // 移动文件到正确位置
-      const extractedDir = path.join(resourcesDir, `node-v${NODE_VERSION}-${NODE_PLATFORM}`)
-      if (await fs.pathExists(extractedDir)) {
-        console.log('📁 正在整理Node.js文件...')
-        await fs.copy(extractedDir, nodeDir)
-        await fs.remove(extractedDir)
-      }
-      
-      // 清理下载的zip文件
-      await fs.remove(nodeZipPath)
-      
-      console.log('✅ Node.js运行时设置完成')
-    }
-    
-    // 验证Node.js安装
-    const nodeExePath = path.join(nodeDir, 'node.exe')
-    if (await fs.pathExists(nodeExePath)) {
-      console.log('🔍 验证Node.js安装...')
-      
-      try {
-        const version = execSync(`"${nodeExePath}" --version`, { encoding: 'utf8' }).trim()
-        console.log('✅ Node.js版本:', version)
-        
-        const npmPath = path.join(nodeDir, 'npm.cmd')
-        if (await fs.pathExists(npmPath)) {
-          const npmVersion = execSync(`"${npmPath}" --version`, { encoding: 'utf8' }).trim()
-          console.log('✅ npm版本:', npmVersion)
+
+    if (platform === 'win32') {
+      console.log('📦 Node.js版本:', NODE_VERSION)
+      console.log('💻 目标平台:', NODE_PLATFORM)
+      const nodeZipPath = path.join(resourcesDir, `node-v${NODE_VERSION}-${NODE_PLATFORM}.zip`)
+      // 确保资源目录存在
+      await fs.ensureDir(resourcesDir)
+      await fs.ensureDir(nodeDir)
+      // 检查是否已经下载过
+      if (await fs.pathExists(path.join(nodeDir, 'node.exe'))) {
+        console.log('✅ Node.js运行时已存在，跳过下载')
+      } else {
+        console.log('⬇️  正在下载Node.js运行时...')
+        console.log('🔗 下载链接:', NODE_DOWNLOAD_URL)
+        // 下载Node.js
+        await downloadFile(NODE_DOWNLOAD_URL, nodeZipPath)
+        console.log('✅ Node.js下载完成')
+        // 解压Node.js
+        console.log('📂 正在解压Node.js...')
+        await extractZip(nodeZipPath, resourcesDir)
+        // 移动文件到正确位置
+        const extractedDir = path.join(resourcesDir, `node-v${NODE_VERSION}-${NODE_PLATFORM}`)
+        if (await fs.pathExists(extractedDir)) {
+          console.log('📁 正在整理Node.js文件...')
+          await fs.copy(extractedDir, nodeDir)
+          await fs.remove(extractedDir)
         }
-      } catch (error) {
-        console.error('❌ Node.js验证失败:', error.message)
-        throw error
+        // 清理下载的zip文件
+        await fs.remove(nodeZipPath)
+        console.log('✅ Node.js运行时设置完成')
+      }
+      // 验证Node.js安装
+      const nodeExePath = path.join(nodeDir, 'node.exe')
+      if (await fs.pathExists(nodeExePath)) {
+        console.log('🔍 验证Node.js安装...')
+        try {
+          const version = execSync(`"${nodeExePath}" --version`, { encoding: 'utf8' }).trim()
+          console.log('✅ Node.js版本:', version)
+          const npmPath = path.join(nodeDir, 'npm.cmd')
+          if (await fs.pathExists(npmPath)) {
+            const npmVersion = execSync(`"${npmPath}" --version`, { encoding: 'utf8' }).trim()
+            console.log('✅ npm版本:', npmVersion)
+          }
+        } catch (error) {
+          console.error('❌ Node.js验证失败:', error.message)
+          throw error
+        }
+      } else {
+        throw new Error('Node.js可执行文件不存在')
       }
     } else {
-      throw new Error('Node.js可执行文件不存在')
+      // 非 Windows 平台，跳过 node.exe 自包含
+      console.log('⚠️ 当前平台非 Windows，跳过 Node.js 自包含，仅配置后端。')
     }
-    
+
     // 现在设置后端
     console.log('🔧 正在设置后端...')
     await setupBackend(nodeDir)
-    
+
     console.log('🎉 完全自包含应用准备完成!')
     console.log('📊 资源统计:')
-    
     // 计算各部分大小
-    const nodeSize = await getDirSize(nodeDir)
+    let nodeSize = 0
+    if (platform === 'win32') {
+      nodeSize = await getDirSize(nodeDir)
+    }
     const backendDir = path.join(projectRoot, 'backend')
     const backendSize = await fs.pathExists(backendDir) ? await getDirSize(backendDir) : 0
-    
-    console.log(`   • Node.js运行时: ${(nodeSize / 1024 / 1024).toFixed(2)} MB`)
+    if (platform === 'win32') {
+      console.log(`   • Node.js运行时: ${(nodeSize / 1024 / 1024).toFixed(2)} MB`)
+    }
     console.log(`   • 后端应用: ${(backendSize / 1024 / 1024).toFixed(2)} MB`)
-    console.log(`   • 总计: ${((nodeSize + backendSize) / 1024 / 1024).toFixed(2)} MB`)
-    
+    if (platform === 'win32') {
+      console.log(`   • 总计: ${((nodeSize + backendSize) / 1024 / 1024).toFixed(2)} MB`)
+    } else {
+      console.log(`   • 总计: ${(backendSize / 1024 / 1024).toFixed(2)} MB`)
+    }
   } catch (error) {
     console.error('❌ 设置自包含应用失败:', error)
     process.exit(1)
