@@ -52,6 +52,6 @@ jobs:
             dist-electron/BetterKugou-*.rpm
             dist-electron/BetterKugou-*.dmg
             dist-electron/BetterKugou-*.zip
-          body: ${{ env.RELEASE_BODY }}
+          body_path: updata_log.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
