@@ -1,4 +1,4 @@
-# BetterKuGou 0.1.1-alpha-pre2 更新日志
+# BetterKuGou 0.1.1-alpha-pre4 更新日志
 
 ## 修复
 - 部分歌曲无法显示歌手名

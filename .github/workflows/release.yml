@@ -36,12 +36,6 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Read update log
-        id: updatelog
-        run: |
-          echo "RELEASE_BODY<<EOF" >> $GITHUB_ENV
-          cat updata_log.md >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
         with:
