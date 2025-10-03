@@ -92,7 +92,7 @@ export default {
   },
   watch: {
     isLyricViewVisible(newVal) {
-      console.log('📺 TitleBar: 歌词界面状态 =', newVal)
+      console.log('TitleBar: 歌词界面状态 =', newVal)
     }
   },
   mounted() {
@@ -174,7 +174,7 @@ export default {
 <style scoped>
 .title-bar {
   height: var(--titlebar-height);
-  background: rgba(26, 26, 26, 0.8);
+  background: var(--color-background);
   backdrop-filter: blur(10px);
   display: flex;
   align-items: center;

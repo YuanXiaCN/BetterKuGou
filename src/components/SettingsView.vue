@@ -225,11 +225,73 @@
           <header class="section-header">
             <h2 class="section-title">快捷键</h2>
           </header>
-          <div class="shortcut-grid">
-            <div class="shortcut-card" v-for="shortcut in shortcutList" :key="shortcut.label">
-              <div class="shortcut-label">{{ shortcut.label }}</div>
-              <div class="shortcut-key">{{ shortcut.key }}</div>
+          
+          <div v-if="!localSettings.shortcuts" class="setting-item">
+            <div class="setting-info">
+              <div class="setting-label">加载中...</div>
+              <div class="setting-desc">正在加载快捷键设置</div>
             </div>
+          </div>
+          
+          <div v-else>
+            <!-- 全局快捷键开关 -->
+            <div class="setting-item">
+              <div class="setting-info">
+                <div class="setting-label">启用全局快捷键</div>
+                <div class="setting-desc">允许在应用程序失去焦点时也能响应快捷键</div>
+              </div>
+              <label class="setting-switch">
+                <input type="checkbox" v-model="localSettings.shortcuts.enableGlobal">
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <!-- 快捷键列表 -->
+            <div class="shortcut-grid">
+            <div 
+              v-for="shortcut in shortcutList" 
+              :key="shortcut.id"
+              class="shortcut-card"
+              :class="{ 
+                'is-editing': editingShortcut === shortcut.id,
+                'has-error': shortcutErrors[shortcut.id]
+              }"
+            >
+              <div class="shortcut-info">
+                <div class="shortcut-label">{{ shortcut.label }}</div>
+                <div class="shortcut-desc">{{ shortcut.description }}</div>
+              </div>
+              <div class="shortcut-key-wrapper">
+                <button 
+                  class="shortcut-key"
+                  :class="{ 'is-error': shortcutErrors[shortcut.id] }"
+                  @click="startEditingShortcut(shortcut.id)"
+                  type="button"
+                >
+                  <span v-if="editingShortcut === shortcut.id" class="recording">
+                    按下按键...
+                  </span>
+                  <span v-else class="key-display">
+                    {{ formatShortcutKey(localSettings.shortcuts.keys[shortcut.id]) }}
+                  </span>
+                </button>
+                <button 
+                  v-if="localSettings.shortcuts.keys[shortcut.id] && localSettings.shortcuts.keys[shortcut.id] !== 'Escape'"
+                  class="clear-shortcut-btn"
+                  @click="clearShortcut(shortcut.id)"
+                  type="button"
+                  title="清除快捷键"
+                >
+                  ×
+                </button>
+              </div>
+              <div v-if="shortcutErrors[shortcut.id]" class="shortcut-error">
+                {{ shortcutErrors[shortcut.id] }}
+              </div>
+            </div>
+          </div>
+          
+          <p class="note-text">按 ESC 键可清除快捷键绑定</p>
           </div>
         </section>
 
@@ -327,12 +389,19 @@ const sectionRefs = {
   software: ref(null)
 }
 
-const shortcutList = [
-  { label: '播放 / 暂停', key: 'Space' },
-  { label: '下一首', key: 'Ctrl + →' },
-  { label: '上一首', key: 'Ctrl + ←' },
-  { label: '老板键', key: 'Ctrl + Alt + H' }
-]
+const shortcutList = ref([
+  { id: 'playPause', label: '播放 / 暂停', description: '切换播放和暂停状态' },
+  { id: 'nextTrack', label: '下一首', description: '播放下一首歌曲' },
+  { id: 'prevTrack', label: '上一首', description: '播放上一首歌曲' },
+  { id: 'volumeUp', label: '音量增加', description: '增加音量' },
+  { id: 'volumeDown', label: '音量减少', description: '减少音量' },
+  { id: 'toggleLyrics', label: '显示/隐藏歌词', description: '切换歌词显示' },
+  { id: 'toggleFullscreen', label: '全屏模式', description: '切换全屏显示' },
+  { id: 'bossKey', label: '老板键', description: '快速隐藏窗口' }
+])
+
+const editingShortcut = ref(null)
+const shortcutErrors = ref({})
 
 const cacheSizeOptions = [
   { value: 2048, label: '2048 MB' },
@@ -350,11 +419,26 @@ const {
   revision,
   exportSettings,
   importSettings,
-  chooseDirectory
+  chooseDirectory,
+  defaults
 } = useSettingsStore()
 
-const localSettings = reactive(cloneDeep(settings))
+// 确保 localSettings 包含所有默认字段
+const ensureDefaults = (settings) => {
+  const defaultSettings = defaults()
+  const merged = cloneDeep(settings)
+  
+  // 如果 shortcuts 不存在,使用默认值
+  if (!merged.shortcuts) {
+    merged.shortcuts = cloneDeep(defaultSettings.shortcuts)
+  }
+  
+  return merged
+}
+
+const localSettings = reactive(ensureDefaults(settings))
 const isSyncingFromStore = ref(false)
+const isInitializing = ref(true) // 防止初始化时触发保存
 const containerPaddingTop = ref(0)
 let scrollListener = null
 let resizeListener = null
@@ -373,35 +457,56 @@ const currentCacheSizeLabel = computed(() => {
 function syncFromStore() {
   if (!ready.value) return
   isSyncingFromStore.value = true
-  replaceReactive(localSettings, cloneDeep(settings))
-  isSyncingFromStore.value = false
+  try {
+    replaceReactive(localSettings, ensureDefaults(settings))
+  } finally {
+    // 使用 nextTick 确保所有响应式更新完成后再恢复标志
+    nextTick(() => {
+      isSyncingFromStore.value = false
+    })
+  }
 }
 
 watch(ready, (value) => {
   if (value) {
     syncFromStore()
+    // 延迟标记初始化完成,避免初始赋值触发保存
+    nextTick(() => {
+      setTimeout(() => {
+        isInitializing.value = false
+      }, 100)
+    })
   }
 }, { immediate: true })
 
-watch(revision, () => {
-  if (isSyncingFromStore.value) return
-  syncFromStore()
-})
+// 注释掉 revision 监听,避免保存后又同步导致循环
+// watch(revision, () => {
+//   if (isSyncingFromStore.value) return
+//   syncFromStore()
+// })
 
 watch(localSettings, () => {
-  if (isSyncingFromStore.value || !ready.value) return
+  if (isSyncingFromStore.value || !ready.value || isInitializing.value) {
+    console.log('[SettingsView] 跳过保存 - isSyncingFromStore:', isSyncingFromStore.value, 'ready:', ready.value, 'isInitializing:', isInitializing.value)
+    return
+  }
   if (saveTimer) {
     clearTimeout(saveTimer)
   }
   saveTimer = setTimeout(async () => {
     try {
+      console.log('[SettingsView] 保存设置...', {
+        defaultPage: localSettings.software?.defaultPage,
+        allSettings: cloneDeep(localSettings)
+      })
       await updateSettings(cloneDeep(localSettings), { merge: false })
+      console.log('[SettingsView] 设置保存成功')
       emit('settings-changed', cloneDeep(localSettings))
     } catch (err) {
       console.error('[SettingsView] 更新设置失败:', err)
     }
     saveTimer = null
-  }, 200)
+  }, 500) // 增加防抖时间到500ms
 }, { deep: true })
 
 function scrollToSection(sectionId) {
@@ -490,6 +595,140 @@ function handleSelectCachePath() {
   return handleSelectPath('cache')
 }
 
+// 快捷键相关函数
+function formatShortcutKey(key) {
+  if (!key || key === 'Escape') return '未设置'
+  return key
+    .replace(/Control/g, 'Ctrl')
+    .replace(/\+/g, ' + ')
+}
+
+function startEditingShortcut(shortcutId) {
+  editingShortcut.value = shortcutId
+  delete shortcutErrors.value[shortcutId]
+  
+  // 设置全局标志,阻止触发其他快捷键
+  window.__editingShortcut = true
+  
+  // 添加键盘监听
+  document.addEventListener('keydown', handleShortcutKeyDown, { capture: true })
+}
+
+function stopEditingShortcut() {
+  editingShortcut.value = null
+  
+  // 清除全局标志
+  window.__editingShortcut = false
+  
+  document.removeEventListener('keydown', handleShortcutKeyDown, { capture: true })
+}
+
+function handleShortcutKeyDown(event) {
+  if (!editingShortcut.value) return
+  
+  event.preventDefault()
+  event.stopPropagation()
+  
+  // 按 ESC 清除快捷键
+  if (event.key === 'Escape') {
+    localSettings.shortcuts.keys[editingShortcut.value] = 'Escape'
+    stopEditingShortcut()
+    return
+  }
+  
+  // 构建快捷键字符串
+  const keys = []
+  if (event.ctrlKey || event.metaKey) keys.push('Control')
+  if (event.altKey) keys.push('Alt')
+  if (event.shiftKey) keys.push('Shift')
+  
+  // 获取主键
+  let mainKey = event.key
+  
+  // 特殊键映射
+  const keyMap = {
+    'ArrowUp': 'Up',
+    'ArrowDown': 'Down',
+    'ArrowLeft': 'Left',
+    'ArrowRight': 'Right',
+    ' ': 'Space'
+  }
+  
+  mainKey = keyMap[mainKey] || mainKey
+  
+  // 忽略单独的修饰键
+  if (['Control', 'Alt', 'Shift', 'Meta'].includes(mainKey)) {
+    return
+  }
+  
+  keys.push(mainKey)
+  const shortcutKey = keys.join('+')
+  
+  // 检查是否与其他快捷键冲突
+  const conflict = shortcutList.value.find(s => 
+    s.id !== editingShortcut.value && 
+    localSettings.shortcuts.keys[s.id] === shortcutKey
+  )
+  
+  if (conflict) {
+    shortcutErrors.value[editingShortcut.value] = `与"${conflict.label}"冲突`
+    setTimeout(() => {
+      delete shortcutErrors.value[editingShortcut.value]
+    }, 3000)
+    stopEditingShortcut()
+    return
+  }
+  
+  // 尝试注册全局快捷键（如果启用）
+  if (localSettings.shortcuts.enableGlobal) {
+    // TODO: 调用 Electron API 注册全局快捷键
+    // 这里需要检查注册是否成功
+    const registered = tryRegisterGlobalShortcut(shortcutKey)
+    if (!registered) {
+      shortcutErrors.value[editingShortcut.value] = '无法注册此快捷键'
+      setTimeout(() => {
+        delete shortcutErrors.value[editingShortcut.value]
+      }, 3000)
+      stopEditingShortcut()
+      return
+    }
+  }
+  
+  // 设置快捷键
+  localSettings.shortcuts.keys[editingShortcut.value] = shortcutKey
+  delete shortcutErrors.value[editingShortcut.value]
+  stopEditingShortcut()
+}
+
+function clearShortcut(shortcutId) {
+  localSettings.shortcuts.keys[shortcutId] = 'Escape'
+  delete shortcutErrors.value[shortcutId]
+}
+
+function tryRegisterGlobalShortcut(key) {
+  // 如果未启用全局快捷键,直接返回成功
+  if (!localSettings.shortcuts.enableGlobal) {
+    return true
+  }
+  
+  // 测试是否能注册全局快捷键
+  if (window.electronAPI?.testGlobalShortcut) {
+    try {
+      const result = window.electronAPI.testGlobalShortcut(key)
+      if (!result) {
+        console.warn('⚠️ 快捷键无法注册:', key)
+      }
+      return result
+    } catch (err) {
+      console.error('测试快捷键注册失败:', err)
+      return false
+    }
+  }
+  
+  // 开发模式或 Electron API 不可用时默认返回成功
+  return true
+}
+
 function updateActiveSection() {
   const container = scrollContainer || settingsMain.value
   if (!container) return
@@ -567,6 +806,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   teardownScrollTracking()
+  stopEditingShortcut() // 清理快捷键编辑监听器
   if (saveTimer) {
     clearTimeout(saveTimer)
     saveTimer = null
@@ -1196,8 +1436,9 @@ defineExpose({
 
 .shortcut-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: var(--spacing-md);
+  margin-top: var(--spacing-md);
 }
 
 .shortcut-card {
@@ -1207,25 +1448,124 @@ defineExpose({
   border-radius: var(--radius-md);
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-xs);
+  gap: var(--spacing-sm);
   transition: all var(--transition-fast);
+  position: relative;
 }
 
 .shortcut-card:hover {
+  border-color: var(--color-border-light);
+  background: var(--color-background-light);
+}
+
+.shortcut-card.is-editing {
   border-color: var(--color-primary);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb), 0.2);
+}
+
+.shortcut-card.has-error {
+  border-color: #ff4d4f;
+}
+
+.shortcut-info {
+  flex: 1;
 }
 
 .shortcut-label {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: var(--spacing-xs);
+}
+
+.shortcut-desc {
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
+  line-height: 1.4;
+}
+
+.shortcut-key-wrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
 }
 
 .shortcut-key {
-  font-size: var(--font-size-lg);
+  flex: 1;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-background-lighter);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--color-text);
+  text-align: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.shortcut-key:hover {
+  border-color: var(--color-primary);
+  background: var(--color-background);
+}
+
+.shortcut-key.is-error {
+  border-color: #ff4d4f;
+  color: #ff4d4f;
+}
+
+.shortcut-key .recording {
+  color: var(--color-primary);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.shortcut-key .key-display {
+  font-family: 'Courier New', monospace;
+}
+
+.clear-shortcut-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.clear-shortcut-btn:hover {
+  background: #ff4d4f;
+  border-color: #ff4d4f;
+  color: white;
+}
+
+.shortcut-error {
+  font-size: var(--font-size-xs);
+  color: #ff4d4f;
+  margin-top: var(--spacing-xs);
+  animation: shake 0.3s ease-in-out;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
 }
 
 .software-logo {

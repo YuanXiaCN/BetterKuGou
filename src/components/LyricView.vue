@@ -657,11 +657,26 @@ export default {
       if (song.artist) return song.artist
       
       // 处理歌手信息数组
-      if (song.singerinfo && Array.isArray(song.singerinfo)) {
-        return song.singerinfo.map(singer => singer.singername).join(' / ')
+      if (song.singerinfo && Array.isArray(song.singerinfo) && song.singerinfo.length > 0) {
+        const names = song.singerinfo.map(singer => {
+          if (typeof singer === 'object' && singer !== null) {
+            return singer.name || singer.singer_name || singer.singername || singer.author_name
+          }
+          return String(singer)
+        }).filter(name => name && name.trim() && name !== '[object Object]')
+        
+        if (names.length > 0) {
+          return names.join(' / ')
+        }
       }
+      
       if (song.authors && Array.isArray(song.authors)) {
-        return song.authors.map(author => author.author_name).join(' / ')
+        return song.authors.map(author => author.author_name).filter(Boolean).join(' / ')
+      }
+      
+      // 从 name 字段提取(格式: "歌手 - 歌名")
+      if (song.name && song.name.includes(' - ')) {
+        return song.name.split(' - ')[0]
       }
       
       return '未知歌手'

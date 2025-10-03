@@ -308,7 +308,13 @@ export default {
       
       // 尝试从 singerinfo 数组获取
       if (song.singerinfo && Array.isArray(song.singerinfo) && song.singerinfo.length > 0) {
-        const names = song.singerinfo.map(s => s.name || s.singername).filter(Boolean)
+        const names = song.singerinfo.map(s => {
+          if (typeof s === 'object' && s !== null) {
+            return s.name || s.singer_name || s.singername || s.author_name
+          }
+          return String(s)
+        }).filter(name => name && name.trim() && name !== '[object Object]')
+        
         if (names.length > 0) {
           return names.join('、')
         }
@@ -323,7 +329,11 @@ export default {
         return song.author
       }
       
-      console.warn('歌手名称字段为空，歌曲对象:', song)
+      // 从 name 字段提取(格式: "歌手 - 歌名")
+      if (song.name && song.name.includes(' - ')) {
+        return song.name.split(' - ')[0]
+      }
+      
       return '未知歌手'
     },
     

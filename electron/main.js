@@ -1,5 +1,5 @@
 // 引入 Electron 模块
-const { app, BrowserWindow, ipcMain, dialog } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, globalShortcut } = require('electron')
 const path = require('path')
 const { spawn } = require('child_process')
 const {
@@ -25,10 +25,153 @@ app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
 // app.disableHardwareAcceleration()
 
 let mainWindow
+let loadingWindow = null
 let backendProcess = null
+// 存储已注册的全局快捷键映射: accelerator -> action
+const registeredShortcuts = new Map()
+// 内存清理定时器
+let memoryCleanupTimer = null
+
+// 创建加载窗口
+function createLoadingWindow() {
+  loadingWindow = new BrowserWindow({
+    width: 400,
+    height: 300,
+    frame: false,
+    transparent: false,
+    resizable: false,
+    center: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    }
+  })
+
+  loadingWindow.loadFile(path.join(__dirname, 'loading.html'))
+  
+  loadingWindow.on('closed', () => {
+    loadingWindow = null
+  })
+
+  return loadingWindow
+}
+
+// 更新加载进度
+function updateLoadingProgress(progress, status, step) {
+  if (loadingWindow && !loadingWindow.isDestroyed()) {
+    loadingWindow.webContents.send('loading-progress', {
+      progress,
+      status,
+      step
+    })
+  }
+}
+
+// 关闭加载窗口
+function closeLoadingWindow() {
+  if (loadingWindow && !loadingWindow.isDestroyed()) {
+    loadingWindow.close()
+    loadingWindow = null
+  }
+}
+
+// 内存清理函数
+function performMemoryCleanup() {
+  console.log('🧹 执行内存清理...')
+  
+  try {
+    // 获取清理前的内存使用情况
+    const beforeMemory = process.memoryUsage()
+    console.log('清理前内存使用:', {
+      rss: `${(beforeMemory.rss / 1024 / 1024).toFixed(2)} MB`,
+      heapUsed: `${(beforeMemory.heapUsed / 1024 / 1024).toFixed(2)} MB`,
+      heapTotal: `${(beforeMemory.heapTotal / 1024 / 1024).toFixed(2)} MB`,
+      external: `${(beforeMemory.external / 1024 / 1024).toFixed(2)} MB`
+    })
+    
+    // 主进程垃圾回收
+    if (global.gc) {
+      global.gc()
+      console.log('✅ 主进程 GC 已执行')
+    } else {
+      console.log('⚠️ 主进程 GC 不可用 (需要使用 --expose-gc 标志启动)')
+    }
+    
+    // 清理所有窗口的渲染进程内存
+    const allWindows = BrowserWindow.getAllWindows()
+    allWindows.forEach((window, index) => {
+      if (!window.isDestroyed()) {
+        // 触发渲染进程的垃圾回收
+        window.webContents.session.clearCache()
+        
+        // 通知渲染进程执行内存清理
+        window.webContents.send('memory-cleanup')
+        
+        console.log(`✅ 窗口 ${index + 1} 内存清理已触发`)
+      }
+    })
+    
+    // 获取清理后的内存使用情况
+    setTimeout(() => {
+      const afterMemory = process.memoryUsage()
+      const savedMemory = (beforeMemory.heapUsed - afterMemory.heapUsed) / 1024 / 1024
+      
+      console.log('清理后内存使用:', {
+        rss: `${(afterMemory.rss / 1024 / 1024).toFixed(2)} MB`,
+        heapUsed: `${(afterMemory.heapUsed / 1024 / 1024).toFixed(2)} MB`,
+        heapTotal: `${(afterMemory.heapTotal / 1024 / 1024).toFixed(2)} MB`,
+        external: `${(afterMemory.external / 1024 / 1024).toFixed(2)} MB`
+      })
+      
+      if (savedMemory > 0) {
+        console.log(`💾 释放了约 ${savedMemory.toFixed(2)} MB 内存`)
+      }
+    }, 1000)
+    
+  } catch (error) {
+    console.error('❌ 内存清理失败:', error)
+  }
+}
+
+// 启动内存清理定时器
+function startMemoryCleanup() {
+  // 每30分钟执行一次内存清理
+  const CLEANUP_INTERVAL = 30 * 60 * 1000 // 30分钟
+  
+  console.log('🔧 启动内存自动清理功能 (每30分钟)')
+  
+  // 清除已存在的定时器
+  if (memoryCleanupTimer) {
+    clearInterval(memoryCleanupTimer)
+  }
+  
+  // 设置新的定时器
+  memoryCleanupTimer = setInterval(() => {
+    performMemoryCleanup()
+  }, CLEANUP_INTERVAL)
+  
+  // 启动后1小时执行首次清理
+  setTimeout(() => {
+    console.log('⏰ 首次定时内存清理')
+    performMemoryCleanup()
+  }, 60 * 60 * 1000) // 1小时后
+}
+
+// 停止内存清理定时器
+function stopMemoryCleanup() {
+  if (memoryCleanupTimer) {
+    clearInterval(memoryCleanupTimer)
+    memoryCleanupTimer = null
+    console.log('🛑 内存自动清理已停止')
+  }
+}
 
 // 启动后端服务器
 function startBackendServer() {
+  updateLoadingProgress(10, '正在启动后端服务...', 'backend')
+  
   let backendPath, backendCwd, nodeExecutable
   
   if (isDev) {
@@ -121,6 +264,7 @@ function startBackendServer() {
     // 检查关键启动信息
     if (message.includes('listening') || message.includes('started') || message.includes('6500')) {
       console.log('✅ 后端服务器启动成功！')
+      updateLoadingProgress(40, '后端服务已启动', 'backend')
       // 发送成功通知到渲染进程
       if (mainWindow) {
         mainWindow.webContents.send('backend-status', { status: 'running', port: 6500 })
@@ -186,14 +330,16 @@ function startBackendServer() {
   setTimeout(() => {
     if (backendProcess && backendProcess.pid) {
       console.log('🎯 后端进程启动成功，PID:', backendProcess.pid)
+      updateLoadingProgress(60, '后端进程运行中...', 'backend')
       // 测试后端连接
       testBackendConnection()
     } else {
       console.error('❌ 后端进程启动失败')
+      updateLoadingProgress(30, '后端启动失败', 'backend')
       // 尝试备用启动方式
       tryAlternativeBackendStart()
     }
-  }, 3000)
+  }, 2000)
 }
 
 // 备用后端启动方式
@@ -237,6 +383,7 @@ function tryAlternativeBackendStart() {
 // 测试后端连接
 function testBackendConnection() {
   console.log('🔍 测试后端连接...')
+  updateLoadingProgress(70, '后端服务就绪', 'backend')
   
   setTimeout(() => {
     const http = require('http')
@@ -268,7 +415,7 @@ function testBackendConnection() {
     })
     
     req.end()
-  }, 2000) // 等待2秒后测试连接
+  }, 1000)
 }
 
 // 停止后端服务器
@@ -282,10 +429,13 @@ function stopBackendServer() {
 
 // 创建浏览器窗口
 function createWindow() {
+  updateLoadingProgress(75, '正在加载前端界面...', 'frontend')
+  
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     frame: false,
+    show: false, // 先不显示,等加载完成后再显示
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -310,6 +460,23 @@ function createWindow() {
 
   mainWindow.loadURL(urlLocation)
 
+  // 页面加载完成后的处理
+  mainWindow.webContents.on('did-finish-load', () => {
+    updateLoadingProgress(90, '准备就绪', 'login')
+    
+    // 立即显示主窗口并关闭加载窗口
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.show()
+        mainWindow.focus()
+      }
+      closeLoadingWindow()
+      
+      // 启动内存自动清理
+      startMemoryCleanup()
+    }, 300)
+  })
+
   // 在开发环境中打开开发者工具
   if (isDev) {
     mainWindow.webContents.openDevTools()
@@ -323,9 +490,14 @@ function createWindow() {
 
 // 应用准备就绪时创建窗口
 app.whenReady().then(async () => {
+  // 首先创建加载窗口
+  createLoadingWindow()
+  updateLoadingProgress(5, '正在初始化...', 'backend')
+  
   try {
     await initSettingsStore(app)
     await ensureCacheDirectory()
+    updateLoadingProgress(15, '配置加载完成', 'backend')
   } catch (err) {
     console.error('❌ 初始化设置存储失败:', err)
   }
@@ -339,10 +511,10 @@ app.whenReady().then(async () => {
   // 启动后端服务器
   startBackendServer()
   
-  // 等待一下让后端启动
+  // 立即创建主窗口(不等待后端完全启动)
   setTimeout(() => {
     createWindow()
-  }, 2000)
+  }, 1500)
 
   // 在 macOS 上，当点击 dock 图标且没有其他窗口打开时，通常会重新创建一个窗口
   app.on('activate', () => {
@@ -443,8 +615,102 @@ ipcMain.handle('settings:choose-directory', async (_event, options = {}) => {
   return { canceled: false, path: result.filePaths[0] }
 })
 
+// 全局快捷键相关 IPC 事件
+ipcMain.handle('shortcut:register', async (_event, accelerator, action) => {
+  try {
+    console.log(`🎹 注册全局快捷键: ${accelerator} -> ${action}`)
+    
+    // 检查快捷键格式是否有效
+    if (!accelerator || typeof accelerator !== 'string') {
+      console.error('❌ 无效的快捷键格式:', accelerator)
+      return { success: false, error: 'Invalid accelerator format' }
+    }
+    
+    // 如果快捷键已经注册,先注销
+    if (registeredShortcuts.has(accelerator)) {
+      globalShortcut.unregister(accelerator)
+      console.log(`🔄 已注销旧的快捷键: ${accelerator}`)
+    }
+    
+    // 尝试注册全局快捷键
+    const success = globalShortcut.register(accelerator, () => {
+      console.log(`⚡ 全局快捷键触发: ${accelerator} -> ${action}`)
+      // 向渲染进程发送快捷键触发事件
+      const allWindows = BrowserWindow.getAllWindows()
+      allWindows.forEach(win => {
+        win.webContents.send('shortcut:triggered', action)
+      })
+    })
+    
+    if (success) {
+      registeredShortcuts.set(accelerator, action)
+      console.log(`✅ 全局快捷键注册成功: ${accelerator}`)
+      return { success: true }
+    } else {
+      console.error(`❌ 全局快捷键注册失败: ${accelerator}`)
+      return { success: false, error: 'Failed to register shortcut' }
+    }
+  } catch (err) {
+    console.error(`❌ 注册快捷键异常: ${accelerator}`, err)
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('shortcut:unregister', async (_event, accelerator) => {
+  try {
+    console.log(`🗑️  注销全局快捷键: ${accelerator}`)
+    
+    if (registeredShortcuts.has(accelerator)) {
+      globalShortcut.unregister(accelerator)
+      registeredShortcuts.delete(accelerator)
+      console.log(`✅ 快捷键注销成功: ${accelerator}`)
+      return { success: true }
+    } else {
+      console.log(`⚠️  快捷键未注册: ${accelerator}`)
+      return { success: true, warning: 'Shortcut was not registered' }
+    }
+  } catch (err) {
+    console.error(`❌ 注销快捷键异常: ${accelerator}`, err)
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('shortcut:test', async (_event, accelerator) => {
+  try {
+    // 测试快捷键是否可以注册(不实际注册)
+    console.log(`🧪 测试快捷键: ${accelerator}`)
+    
+    if (!accelerator || typeof accelerator !== 'string') {
+      return { canRegister: false, error: 'Invalid accelerator format' }
+    }
+    
+    // 检查是否已被其他应用占用
+    const isRegistered = globalShortcut.isRegistered(accelerator)
+    
+    if (isRegistered && !registeredShortcuts.has(accelerator)) {
+      // 被其他应用占用
+      console.log(`⚠️  快捷键已被占用: ${accelerator}`)
+      return { canRegister: false, error: 'Shortcut is already registered by another application' }
+    }
+    
+    console.log(`✅ 快捷键可用: ${accelerator}`)
+    return { canRegister: true }
+  } catch (err) {
+    console.error(`❌ 测试快捷键异常: ${accelerator}`, err)
+    return { canRegister: false, error: err.message }
+  }
+})
+
 // 当所有窗口都关闭时退出应用
 app.on('window-all-closed', () => {
+  // 注销所有全局快捷键
+  console.log('🗑️  注销所有全局快捷键...')
+  globalShortcut.unregisterAll()
+  registeredShortcuts.clear()
+  
+  // 停止内存清理定时器
+  stopMemoryCleanup()
+  
   // 关闭后端服务器
   stopBackendServer()
   
@@ -456,5 +722,22 @@ app.on('window-all-closed', () => {
 
 // 应用退出前的清理
 app.on('before-quit', () => {
+  // 注销所有全局快捷键
+  console.log('🗑️  应用退出前清理快捷键...')
+  globalShortcut.unregisterAll()
+  registeredShortcuts.clear()
+  
+  // 停止内存清理定时器
+  stopMemoryCleanup()
+  
   stopBackendServer()
+})
+
+// 应用失去焦点时的处理(可选,用于调试)
+app.on('browser-window-blur', () => {
+  console.log('📴 应用失去焦点 (全局快捷键仍然有效)')
+})
+
+app.on('browser-window-focus', () => {
+  console.log('📳 应用获得焦点')
 })

@@ -26,6 +26,19 @@ const baseDefaultSettings = Object.freeze({
       background: '#1f1f1f'
     }
   },
+  shortcuts: {
+    enableGlobal: false,
+    keys: {
+      playPause: 'Space',
+      nextTrack: 'Control+Right',
+      prevTrack: 'Control+Left',
+      volumeUp: 'Control+Up',
+      volumeDown: 'Control+Down',
+      toggleLyrics: 'L',
+      toggleFullscreen: 'F',
+      bossKey: 'Control+Alt+H'
+    }
+  },
   software: {
     autoLaunch: false,
     restorePlaylist: true,

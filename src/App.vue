@@ -282,15 +282,237 @@ const handleToggleFavorite = (song) => {
   // TODO: 添加/移除收藏
 }
 
+// 快捷键处理
+const handleKeyDown = (event) => {
+  // 如果正在输入,忽略快捷键
+  const target = event.target
+  if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+    return
+  }
+
+  // 如果正在编辑快捷键,不触发任何快捷键
+  if (window.__editingShortcut) {
+    return
+  }
+
+  if (!settings.shortcuts) return
+
+  const keys = []
+  if (event.ctrlKey || event.metaKey) keys.push('Control')
+  if (event.altKey) keys.push('Alt')
+  if (event.shiftKey) keys.push('Shift')
+
+  let mainKey = event.key
+  const keyMap = {
+    'ArrowUp': 'Up',
+    'ArrowDown': 'Down',
+    'ArrowLeft': 'Left',
+    'ArrowRight': 'Right',
+    ' ': 'Space'
+  }
+  mainKey = keyMap[mainKey] || mainKey
+  
+  if (['Control', 'Alt', 'Shift', 'Meta'].includes(mainKey)) {
+    return
+  }
+
+  keys.push(mainKey)
+  const pressedKey = keys.join('+')
+
+  const shortcuts = settings.shortcuts.keys
+  if (!shortcuts) return
+
+  // 匹配快捷键并执行对应操作
+  let handled = false
+
+  if (pressedKey === shortcuts.playPause && shortcuts.playPause !== 'Escape') {
+    event.preventDefault()
+    musicPlayerRef.value?.togglePlay()
+    handled = true
+  } else if (pressedKey === shortcuts.nextTrack && shortcuts.nextTrack !== 'Escape') {
+    event.preventDefault()
+    musicPlayerRef.value?.playNext()
+    handled = true
+  } else if (pressedKey === shortcuts.prevTrack && shortcuts.prevTrack !== 'Escape') {
+    event.preventDefault()
+    musicPlayerRef.value?.playPrevious()
+    handled = true
+  } else if (pressedKey === shortcuts.volumeUp && shortcuts.volumeUp !== 'Escape') {
+    event.preventDefault()
+    if (musicPlayerRef.value) {
+      musicPlayerRef.value.volume = Math.min(100, musicPlayerRef.value.volume + 5)
+    }
+    handled = true
+  } else if (pressedKey === shortcuts.volumeDown && shortcuts.volumeDown !== 'Escape') {
+    event.preventDefault()
+    if (musicPlayerRef.value) {
+      musicPlayerRef.value.volume = Math.max(0, musicPlayerRef.value.volume - 5)
+    }
+    handled = true
+  } else if (pressedKey === shortcuts.toggleLyrics && shortcuts.toggleLyrics !== 'Escape') {
+    event.preventDefault()
+    musicPlayerRef.value?.toggleLyrics()
+    handled = true
+  } else if (pressedKey === shortcuts.toggleFullscreen && shortcuts.toggleFullscreen !== 'Escape') {
+    event.preventDefault()
+    if (window.electronAPI?.toggleFullscreen) {
+      window.electronAPI.toggleFullscreen()
+    }
+    handled = true
+  } else if (pressedKey === shortcuts.bossKey && shortcuts.bossKey !== 'Escape') {
+    event.preventDefault()
+    if (window.electronAPI?.hide) {
+      window.electronAPI.hide()
+    }
+    handled = true
+  }
+
+  if (handled) {
+    console.log('🎹 快捷键触发:', pressedKey)
+  }
+}
+
+// 全局快捷键注册
+const registeredGlobalShortcuts = ref(new Set())
+
+function registerGlobalShortcuts() {
+  if (!window.electronAPI?.registerGlobalShortcut) {
+    console.warn('⚠️ Electron API 不可用,无法注册全局快捷键')
+    return
+  }
+
+  if (!settings.shortcuts?.enableGlobal) {
+    // 如果关闭了全局快捷键,注销所有
+    unregisterAllGlobalShortcuts()
+    return
+  }
+
+  const shortcuts = settings.shortcuts.keys
+  if (!shortcuts) return
+
+  // 注销所有旧的快捷键
+  unregisterAllGlobalShortcuts()
+
+  // 注册新的快捷键
+  Object.entries(shortcuts).forEach(([action, key]) => {
+    if (!key || key === 'Escape') return
+
+    try {
+      const success = window.electronAPI.registerGlobalShortcut(key, action)
+      if (success) {
+        registeredGlobalShortcuts.value.add(key)
+        console.log('✅ 全局快捷键注册成功:', key, '→', action)
+      } else {
+        console.warn('❌ 全局快捷键注册失败:', key)
+      }
+    } catch (err) {
+      console.error('全局快捷键注册错误:', key, err)
+    }
+  })
+}
+
+function unregisterAllGlobalShortcuts() {
+  if (!window.electronAPI?.unregisterGlobalShortcut) return
+
+  registeredGlobalShortcuts.value.forEach(key => {
+    try {
+      window.electronAPI.unregisterGlobalShortcut(key)
+      console.log('🔓 全局快捷键已注销:', key)
+    } catch (err) {
+      console.error('注销全局快捷键错误:', key, err)
+    }
+  })
+
+  registeredGlobalShortcuts.value.clear()
+}
+
+// 监听全局快捷键设置变化
+watch(
+  () => [settings.shortcuts?.enableGlobal, settings.shortcuts?.keys],
+  () => {
+    if (settingsReady.value) {
+      registerGlobalShortcuts()
+    }
+  },
+  { deep: true }
+)
+
+// 监听来自主进程的全局快捷键触发
+onMounted(() => {
+  if (window.electronAPI?.onGlobalShortcut) {
+    window.electronAPI.onGlobalShortcut((action) => {
+      console.log('🌐 全局快捷键触发:', action)
+      
+      // 执行对应的操作
+      switch (action) {
+        case 'playPause':
+          musicPlayerRef.value?.togglePlay()
+          break
+        case 'nextTrack':
+          musicPlayerRef.value?.playNext()
+          break
+        case 'prevTrack':
+          musicPlayerRef.value?.playPrevious()
+          break
+        case 'volumeUp':
+          if (musicPlayerRef.value) {
+            musicPlayerRef.value.volume = Math.min(100, musicPlayerRef.value.volume + 5)
+          }
+          break
+        case 'volumeDown':
+          if (musicPlayerRef.value) {
+            musicPlayerRef.value.volume = Math.max(0, musicPlayerRef.value.volume - 5)
+          }
+          break
+        case 'toggleLyrics':
+          musicPlayerRef.value?.toggleLyrics()
+          break
+        case 'toggleFullscreen':
+          if (window.electronAPI?.toggleFullscreen) {
+            window.electronAPI.toggleFullscreen()
+          }
+          break
+        case 'bossKey':
+          if (window.electronAPI?.hide) {
+            window.electronAPI.hide()
+          }
+          break
+      }
+    })
+  }
+})
+
 // 应用启动时检查登录状态
 onMounted(() => {
   checkLoginStatus()
+  
+  // 添加快捷键监听
+  document.addEventListener('keydown', handleKeyDown)
+  
+  // 注册全局快捷键
+  if (settingsReady.value) {
+    registerGlobalShortcuts()
+  }
+  
   if (typeof window !== 'undefined') {
     window.addEventListener('beforeunload', handleBeforeUnload)
+  }
+  
+  // 监听内存清理事件
+  if (window.electronAPI && window.electronAPI.onMemoryCleanup) {
+    window.electronAPI.onMemoryCleanup(() => {
+      performMemoryCleanup()
+    })
   }
 })
 
 onBeforeUnmount(() => {
+  // 移除快捷键监听
+  document.removeEventListener('keydown', handleKeyDown)
+  
+  // 注销所有全局快捷键
+  unregisterAllGlobalShortcuts()
+  
   if (sessionPersistTimer) {
     clearTimeout(sessionPersistTimer)
     sessionPersistTimer = null
@@ -301,33 +523,43 @@ onBeforeUnmount(() => {
 })
 
 function applyDefaultPage(page) {
+  console.log('[App] applyDefaultPage 调用:', { 
+    page, 
+    userLoggedIn: userLoggedIn.value,
+    currentView: currentView.value,
+    hasAppliedDefaultPage: hasAppliedDefaultPage.value
+  })
+  
+  // 计算期望的页面
   const desired = page === 'favorites' && !userLoggedIn.value ? 'home' : page
   const normalizedDesired = desired === 'favorites' ? 'favorite' : desired
-
+  
+  console.log('[App] 计算结果:', { desired, normalizedDesired })
+  
+  // 首次应用：直接设置
   if (!hasAppliedDefaultPage.value) {
     if (normalizedDesired && normalizedDesired !== currentView.value) {
       currentView.value = normalizedDesired
+      console.log('[App] 首次应用，已切换到:', normalizedDesired)
     }
     hasAppliedDefaultPage.value = true
     return
   }
-
-  if (!normalizedDesired || showSettings.value) return
-  if (!['home', 'favorite'].includes(currentView.value)) return
-
-  if (normalizedDesired === 'favorite' && !userLoggedIn.value) {
-    currentView.value = 'home'
-    return
-  }
-
-  if (normalizedDesired !== currentView.value) {
+  
+  // 已应用过，但如果当前在 home 页面，且期望页面是 favorite，且用户刚登录
+  // 则允许切换到 favorite（这是为了处理登录状态延迟的情况）
+  if (normalizedDesired === 'favorite' && 
+      currentView.value === 'home' && 
+      userLoggedIn.value) {
     currentView.value = normalizedDesired
+    console.log('[App] 登录后切换到收藏页:', normalizedDesired)
   }
 }
 
 watch(
-  [settingsReady, () => settings.software?.defaultPage],
-  ([ready, page]) => {
+  [settingsReady, () => settings.software?.defaultPage, userLoggedIn],
+  ([ready, page, loggedIn]) => {
+    console.log('[App] watch 触发:', { ready, page, loggedIn, hasApplied: hasAppliedDefaultPage.value })
     if (!ready) return
     applyDefaultPage(page)
   },
@@ -548,6 +780,58 @@ watch(
 
 function handleBeforeUnload() {
   queueSessionPersist({ immediate: true })
+}
+
+// 渲染进程内存清理
+function performMemoryCleanup() {
+  console.log('🧹 [渲染进程] 执行内存清理...')
+  
+  try {
+    // 1. 清理音频缓存
+    if (musicPlayerRef.value && musicPlayerRef.value.$refs.audioPlayer) {
+      const audio = musicPlayerRef.value.$refs.audioPlayer
+      // 清理音频资源但不影响当前播放
+      if (audio.paused) {
+        audio.src = ''
+        audio.load()
+      }
+    }
+    
+    // 2. 清理图片缓存 - 移除不可见的图片元素
+    const images = document.querySelectorAll('img[data-loaded="true"]')
+    images.forEach(img => {
+      const rect = img.getBoundingClientRect()
+      // 如果图片不在视口内且已加载
+      if (rect.top < -500 || rect.bottom > window.innerHeight + 500) {
+        // 清理图片引用，但保留占位
+        if (img.dataset.originalSrc) {
+          img.removeAttribute('src')
+        }
+      }
+    })
+    
+    // 3. 触发垃圾回收（如果可用）
+    if (window.gc) {
+      window.gc()
+      console.log('✅ 渲染进程 GC 已执行')
+    }
+    
+    // 4. 清理大型数组和对象缓存
+    // 保留最近的播放历史，清理较旧的
+    if (playlist.value.length > 100) {
+      console.log(`清理播放列表，保留最近100首歌曲 (原有 ${playlist.value.length} 首)`)
+      // 保留当前播放的歌曲和前后的歌曲
+      const currentIndex = playlistIndex.value
+      const start = Math.max(0, currentIndex - 50)
+      const end = Math.min(playlist.value.length, currentIndex + 50)
+      playlist.value = playlist.value.slice(start, end)
+      playlistIndex.value = currentIndex - start
+    }
+    
+    console.log('✅ [渲染进程] 内存清理完成')
+  } catch (error) {
+    console.error('❌ [渲染进程] 内存清理失败:', error)
+  }
 }
 </script>
 

@@ -36,9 +36,22 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Read update log
+        id: updatelog
+        run: |
+          echo "RELEASE_BODY<<EOF" >> $GITHUB_ENV
+          cat updata_log.md >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
         with:
-          files: dist-electron/*
+          files: |
+            dist-electron/BetterKugou-*.exe
+            dist-electron/BetterKugou-*.AppImage
+            dist-electron/BetterKugou-*.deb
+            dist-electron/BetterKugou-*.rpm
+            dist-electron/BetterKugou-*.dmg
+            dist-electron/BetterKugou-*.zip
+          body: ${{ env.RELEASE_BODY }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,7 +1,7 @@
 <template>
-  <div class="music-player" v-if="currentSong">
-    <!-- 进度条 -->
-    <div class="progress-bar-container">
+  <div class="music-player" v-if="currentSong" :class="{ 'player-style-netease': playerStyle === 'netease' }">
+    <!-- 默认样式：进度条在顶部 -->
+    <div v-if="playerStyle !== 'netease'" class="progress-bar-container">
       <input 
         type="range" 
         class="progress-bar" 
@@ -15,7 +15,7 @@
     </div>
 
     <!-- 播放器主体 -->
-    <div class="player-main">
+    <div class="player-main" :class="{ 'isPlaying': isPlaying }">
       <!-- 左侧：歌曲信息 -->
       <div class="song-info-section">
         <img 
@@ -28,14 +28,15 @@
         />
         <div class="song-details">
           <div class="song-name">{{ getSongName(currentSong.name) }}</div>
-          <div class="song-artist">{{ getSingerNames(currentSong.singerinfo) }}</div>
+          <div class="song-artist">{{ getSingerNames(currentSong.singerinfo) || currentSong.singername || (currentSong.name && currentSong.name.includes(' - ') ? currentSong.name.split(' - ')[0] : '未知歌手') }}</div>
         </div>
         <button class="icon-btn favorite-btn" :class="{ active: isFavorite }" @click="toggleFavorite">
           <svg viewBox="0 0 1024 1024" width="18" height="18" fill="currentColor">
             <path d="M923 283.6a260.04 260.04 0 00-56.9-82.8 264.4 264.4 0 00-84-55.5A265.34 265.34 0 00679.7 125c-49.3 0-97.4 13.5-139.2 39-10 6.1-19.5 12.8-28.5 20.1-9-7.3-18.5-14-28.5-20.1-41.8-25.5-89.9-39-139.2-39-35.5 0-69.9 6.8-102.4 20.3-31.4 13-59.7 31.7-84 55.5a258.44 258.44 0 00-56.9 82.8c-13.9 32.3-21 66.6-21 101.9 0 33.3 6.8 68 20.3 103.3 11.3 29.5 27.5 60.1 48.2 91 32.8 48.9 77.9 99.9 133.9 151.6 92.8 85.7 184.7 144.9 188.6 147.3l23.7 15.2c10.5 6.7 24 6.7 34.5 0l23.7-15.2c3.9-2.5 95.7-61.6 188.6-147.3 56-51.7 101.1-102.7 133.9-151.6 20.7-30.9 37-61.5 48.2-91 13.5-35.3 20.3-70 20.3-103.3.1-35.3-7-69.6-20.9-101.9z"/>
           </svg>
         </button>
-        <div class="time-info">
+        <!-- 默认样式：时间信息在这里 -->
+        <div v-if="playerStyle !== 'netease'" class="time-info">
           <span class="current-time">{{ formatTime(currentTime) }}</span>
           <span class="separator">/</span>
           <span class="total-time">{{ formatTime(duration) }}</span>
@@ -44,7 +45,14 @@
 
       <!-- 中间：播放控制 -->
       <div class="player-controls-section">
-        <div class="control-buttons">
+        <!-- 网易云样式：收藏和播放模式按钮与控制按钮在一起 -->
+        <div v-if="playerStyle === 'netease'" class="control-buttons netease-controls">
+          <button class="icon-btn favorite-btn" :class="{ active: isFavorite }" @click="toggleFavorite">
+            <svg viewBox="0 0 1024 1024" width="18" height="18" fill="currentColor">
+              <path d="M923 283.6a260.04 260.04 0 00-56.9-82.8 264.4 264.4 0 00-84-55.5A265.34 265.34 0 00679.7 125c-49.3 0-97.4 13.5-139.2 39-10 6.1-19.5 12.8-28.5 20.1-9-7.3-18.5-14-28.5-20.1-41.8-25.5-89.9-39-139.2-39-35.5 0-69.9 6.8-102.4 20.3-31.4 13-59.7 31.7-84 55.5a258.44 258.44 0 00-56.9 82.8c-13.9 32.3-21 66.6-21 101.9 0 33.3 6.8 68 20.3 103.3 11.3 29.5 27.5 60.1 48.2 91 32.8 48.9 77.9 99.9 133.9 151.6 92.8 85.7 184.7 144.9 188.6 147.3l23.7 15.2c10.5 6.7 24 6.7 34.5 0l23.7-15.2c3.9-2.5 95.7-61.6 188.6-147.3 56-51.7 101.1-102.7 133.9-151.6 20.7-30.9 37-61.5 48.2-91 13.5-35.3 20.3-70 20.3-103.3.1-35.3-7-69.6-20.9-101.9z"/>
+            </svg>
+          </button>
+          
           <button class="control-btn" @click="playPrevious" :disabled="isSwitchingSong" title="上一曲">
             <svg viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor">
               <path d="M793.6 150.4c-12.8 0-25.6 4.8-35.2 14.4L416 480v-288c0-19.2-16-35.2-35.2-35.2s-35.2 16-35.2 35.2v646.4c0 19.2 16 35.2 35.2 35.2s35.2-16 35.2-35.2V544l342.4 315.2c9.6 9.6 22.4 14.4 35.2 14.4 19.2 0 35.2-16 35.2-35.2V185.6c0-19.2-16-35.2-35.2-35.2z"/>
@@ -65,6 +73,59 @@
               <path d="M230.4 150.4c12.8 0 25.6 4.8 35.2 14.4L608 480v-288c0-19.2 16-35.2 35.2-35.2s35.2 16 35.2 35.2v646.4c0 19.2-16 35.2-35.2 35.2s-35.2-16-35.2-35.2V544L265.6 859.2c-9.6 9.6-22.4 14.4-35.2 14.4-19.2 0-35.2-16-35.2-35.2V185.6c0-19.2 16-35.2 35.2-35.2z"/>
             </svg>
           </button>
+          
+          <button 
+            class="icon-btn" 
+            @click="togglePlayMode" 
+            @contextmenu.prevent.stop="showPlayModeMenu"
+            :title="playModeText"
+          >
+            <img v-if="playMode === 'loop'" :src="repeatAllIcon" alt="列表循环" width="18" height="18" />
+            <img v-else-if="playMode === 'single'" :src="repeatOneIcon" alt="单曲循环" width="18" height="18" />
+            <img v-else :src="shuffleIcon" alt="随机播放" width="18" height="18" />
+          </button>
+        </div>
+        
+        <!-- 默认样式：只有播放控制按钮 -->
+        <div v-else class="control-buttons">
+          <button class="control-btn" @click="playPrevious" :disabled="isSwitchingSong" title="上一曲">
+            <svg viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor">
+              <path d="M793.6 150.4c-12.8 0-25.6 4.8-35.2 14.4L416 480v-288c0-19.2-16-35.2-35.2-35.2s-35.2 16-35.2 35.2v646.4c0 19.2 16 35.2 35.2 35.2s35.2-16 35.2-35.2V544l342.4 315.2c9.6 9.6 22.4 14.4 35.2 14.4 19.2 0 35.2-16 35.2-35.2V185.6c0-19.2-16-35.2-35.2-35.2z"/>
+            </svg>
+          </button>
+          
+          <button class="control-btn play-btn" @click="togglePlay">
+            <svg v-if="isPlaying" viewBox="0 0 1024 1024" width="24" height="24" fill="currentColor">
+              <path d="M304 176h80v672h-80zm336 0h80v672h-80z"/>
+            </svg>
+            <svg v-else viewBox="0 0 1024 1024" width="24" height="24" fill="currentColor">
+              <path d="M719.4 499.1l-296.1-215A15.9 15.9 0 00398 297v430c0 13.1 14.8 20.5 25.3 12.9l296.1-215a15.9 15.9 0 000-25.8z"/>
+            </svg>
+          </button>
+          
+          <button class="control-btn" @click="playNext" :disabled="isSwitchingSong" title="下一曲">
+            <svg viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor">
+              <path d="M230.4 150.4c12.8 0 25.6 4.8 35.2 14.4L608 480v-288c0-19.2 16-35.2 35.2-35.2s35.2 16 35.2 35.2v646.4c0 19.2-16 35.2-35.2 35.2s-35.2-16-35.2-35.2V544L265.6 859.2c-9.6 9.6-22.4 14.4-35.2 14.4-19.2 0-35.2-16-35.2-35.2V185.6c0-19.2 16-35.2 35.2-35.2z"/>
+            </svg>
+          </button>
+        </div>
+        
+        <!-- 网易云样式：进度条在播放按钮下方 -->
+        <div v-if="playerStyle === 'netease'" class="netease-progress-wrapper">
+          <span class="time-text">{{ formatTime(currentTime) }}</span>
+          <div class="progress-bar-container">
+            <input 
+              type="range" 
+              class="progress-bar" 
+              :style="{ '--progress': progressPercent + '%' }"
+              min="0" 
+              :max="duration"
+              :value="currentTime"
+              @input="handleProgressDrag"
+              @change="handleProgressChange"
+            />
+          </div>
+          <span class="time-text">{{ formatTime(duration - currentTime) }}</span>
         </div>
       </div>
 
@@ -158,11 +219,13 @@
 </template>
 
 <script>
+import { computed } from 'vue'
 import { getSongUrl, getLyric, getSongDetail } from '../api/music.js'
 import PlaylistDrawer from './PlaylistDrawer.vue'
 import ContextMenu from './ContextMenu.vue'
 import LyricView from './LyricView.vue'
 import contextMenuManager from '../utils/contextMenuManager.js'
+import { useSettingsStore } from '../stores/settingsStore.js'
 
 // 动态导入 SVG 图标
 import playlistIcon from '../icon/playlist.svg'
@@ -189,6 +252,17 @@ export default {
     playlist: {
       type: Array,
       default: () => []
+    }
+  },
+  setup() {
+    const { settings } = useSettingsStore()
+    const playerStyle = computed(() => {
+      const style = settings.custom?.playerStyle || 'default'
+      console.log('🎨 当前播放器样式:', style)
+      return style
+    })
+    return {
+      playerStyle
     }
   },
   data() {
@@ -372,6 +446,13 @@ export default {
           if (detailResponse && detailResponse.status === 1 && detailResponse.data && detailResponse.data.length > 0) {
             audioDetail = { ...song, ...detailResponse.data[0] }
             console.log('合并后的歌曲信息:', audioDetail)
+            console.log('🎵 歌手信息字段检查:', {
+              'singerinfo': audioDetail.singerinfo,
+              'singername': audioDetail.singername,
+              'author_name': audioDetail.author_name,
+              'singer_name': audioDetail.singer_name,
+              'filename': audioDetail.filename
+            })
           }
         }
         
@@ -1133,8 +1214,27 @@ export default {
     
     // 获取歌手名称
     getSingerNames(singerinfo) {
-      if (!singerinfo || !Array.isArray(singerinfo)) return '未知歌手'
-      return singerinfo.map(s => s.name).join('、')
+      // 如果是数组格式 (标准的 singerinfo)
+      if (Array.isArray(singerinfo) && singerinfo.length > 0) {
+        const names = singerinfo.map(s => {
+          // 处理对象格式的歌手信息
+          if (typeof s === 'object' && s !== null) {
+            return s.name || s.singer_name || s.singername || s.author_name || String(s)
+          }
+          // 处理字符串格式
+          return String(s)
+        }).filter(name => name && name.trim() && name !== '[object Object]')
+        
+        // 如果过滤后有有效的名字,返回拼接结果
+        if (names.length > 0) {
+          return names.join('、')
+        }
+      }
+      // 如果是字符串格式
+      if (typeof singerinfo === 'string' && singerinfo.trim()) {
+        return singerinfo
+      }
+      return null // 返回 null 而不是 '未知歌手',让调用方处理备选方案
     },
     
     // 更新系统媒体会话信息 (SMTC - System Media Transport Controls)
@@ -1143,7 +1243,27 @@ export default {
         try {
           // 提取歌名（去除歌手前缀）
           const songTitle = this.getSongName(song.filename || song.songname || song.audio_name || '未知歌曲')
-          const artistName = this.getSingerNames(song.singerinfo) || song.singername || '未知歌手'
+          
+          // 尝试多种方式获取歌手名称
+          let artistName = this.getSingerNames(song.singerinfo) 
+            || song.singername 
+            || song.author_name 
+            || song.singer_name
+            || (song.name && song.name.includes(' - ') ? song.name.split(' - ')[0] : null)
+            || (song.filename && song.filename.includes(' - ') ? song.filename.split(' - ')[0] : null)
+            || '未知歌手'
+          
+          console.log('🎤 歌手信息调试:', {
+            'song.singerinfo': song.singerinfo,
+            'singerinfo[0]': song.singerinfo && song.singerinfo[0] ? song.singerinfo[0] : null,
+            'singerinfo详细内容': song.singerinfo ? JSON.stringify(song.singerinfo) : null,
+            'song.singername': song.singername,
+            'song.author_name': song.author_name,
+            'song.singer_name': song.singer_name,
+            'song.filename': song.filename,
+            'song.name': song.name,
+            '最终使用的歌手名': artistName
+          })
           
           // 获取封面图片 URL
           let coverUrl = song.img || song.album_cover || song.cover || ''
@@ -1314,6 +1434,154 @@ export default {
   -webkit-user-select: none;
 }
 
+/* ============ 网易云样式 ============ */
+
+/* 强制覆盖默认布局 */
+.music-player.player-style-netease .player-main {
+  display: grid !important;
+  grid-template-columns: auto 1fr auto !important;
+  max-width: none !important;
+  padding: var(--spacing-md) var(--spacing-lg) !important;
+  gap: var(--spacing-xl) !important;
+}
+
+.player-style-netease .song-cover {
+  width: 64px;
+  height: 64px;
+  border-radius: 50% !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  animation: rotate 20s linear infinite;
+  animation-play-state: paused;
+}
+
+.player-style-netease .player-main.isPlaying .song-cover {
+  animation-play-state: running;
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.player-style-netease .song-cover:hover {
+  transform: scale(1.05) !important;
+}
+
+.player-style-netease .song-info-section {
+  gap: var(--spacing-md);
+  justify-content: flex-start !important;
+}
+
+/* 网易云样式：隐藏左侧的收藏按钮 */
+.player-style-netease .song-info-section .favorite-btn {
+  display: none !important;
+}
+
+.player-style-netease .song-name {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+}
+
+.player-style-netease .control-btn {
+  width: 40px;
+  height: 40px;
+}
+
+.player-style-netease .play-btn {
+  width: 52px;
+  height: 52px;
+}
+
+/* 网易云样式：控制区域布局 */
+.player-style-netease .player-controls-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.player-style-netease .control-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 网易云样式：扩展的控制按钮组 */
+.player-style-netease .netease-controls {
+  gap: var(--spacing-md);
+}
+
+.player-style-netease .netease-controls .icon-btn {
+  width: 32px;
+  height: 32px;
+}
+
+/* 网易云样式：右侧区域靠右对齐 */
+.player-style-netease .player-extras-section {
+  justify-content: flex-end;
+}
+
+/* 网易云样式：进度条包装器 */
+.player-style-netease .netease-progress-wrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  width: 100%;
+}
+
+.player-style-netease .netease-progress-wrapper .time-text {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  min-width: 42px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.player-style-netease .netease-progress-wrapper .progress-bar-container {
+  flex: 1;
+  min-width: 200px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  position: relative;
+  border-radius: 2px;
+  padding: 0;
+  margin: 0;
+}
+
+.player-style-netease .netease-progress-wrapper .progress-bar {
+  height: 4px;
+}
+
+.player-style-netease .netease-progress-wrapper .progress-bar::-webkit-slider-runnable-track {
+  height: 4px;
+}
+
+.player-style-netease .netease-progress-wrapper .progress-bar::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+}
+
+.player-style-netease .netease-progress-wrapper .progress-bar::-moz-range-track {
+  height: 4px;
+}
+
+.player-style-netease .netease-progress-wrapper .progress-bar::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+}
+
+/* ============ 默认样式（原有样式）============ */
+
 /* 进度条 */
 .progress-bar-container {
   height: 4px;
@@ -1424,6 +1692,13 @@ export default {
   gap: var(--spacing-lg);
   max-width: 1400px;
   margin: 0 auto;
+}
+
+/* 网易云样式：调整布局比例 */
+.player-style-netease .player-main {
+  grid-template-columns: 280px 1fr 280px;
+  max-width: 1200px;
+  padding: var(--spacing-lg) var(--spacing-xl);
 }
 
 /* 左侧：歌曲信息 */

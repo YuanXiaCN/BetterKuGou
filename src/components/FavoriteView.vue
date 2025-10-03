@@ -63,7 +63,7 @@
           </div>
         </div>
 
-        <div class="col-artist">{{ getSingerNames(song.singerinfo) }}</div>
+        <div class="col-artist">{{ getSingerNames(song.singerinfo, song) || song.singername || song.author_name || (song.name && song.name.includes(' - ') ? song.name.split(' - ')[0] : '-') }}</div>
         <div class="col-album">{{ song.albuminfo?.name || song.remark || '-' }}</div>
         <div class="col-duration">
           {{ formatDuration(song.timelen) }}
@@ -100,6 +100,7 @@
 import { getUserPlaylists, getPlaylistTracks } from '../api/music.js'
 import ContextMenu from './ContextMenu.vue'
 import contextMenuManager from '../utils/contextMenuManager.js'
+import { useSettingsStore } from '../stores/settingsStore.js'
 
 export default {
   name: 'FavoriteView',
@@ -111,6 +112,10 @@ export default {
       type: Object,
       default: null
     }
+  },
+  setup() {
+    const { settings } = useSettingsStore()
+    return { settings }
   },
   data() {
     return {
@@ -270,9 +275,34 @@ export default {
     },
     
     // 获取歌手名称
-    getSingerNames(singerinfo) {
-      if (!singerinfo || !Array.isArray(singerinfo)) return '-'
-      return singerinfo.map(s => s.name).join('、')
+    getSingerNames(singerinfo, song) {
+      // 调试: 查看第一首歌的完整数据
+      if (song && this.favoriteList.indexOf(song) === 0) {
+        console.log('🎤 收藏页面 - 第一首歌数据:', song)
+        console.log('🎤 收藏页面 - singerinfo:', singerinfo)
+      }
+      
+      // 如果是数组格式 (标准的 singerinfo)
+      if (Array.isArray(singerinfo) && singerinfo.length > 0) {
+        const names = singerinfo.map(s => {
+          // 处理对象格式的歌手信息
+          if (typeof s === 'object' && s !== null) {
+            return s.name || s.singer_name || s.singername || s.author_name
+          }
+          // 处理字符串格式
+          return String(s)
+        }).filter(name => name && name.trim() && name !== '[object Object]')
+        
+        // 如果过滤后有有效的名字,返回拼接结果
+        if (names.length > 0) {
+          return names.join('、')
+        }
+      }
+      // 如果是字符串格式
+      if (typeof singerinfo === 'string' && singerinfo.trim()) {
+        return singerinfo
+      }
+      return null // 返回 null 让模板使用备选方案
     },
     
     // 提取歌曲名称（去掉"歌手 - "前缀）
@@ -289,7 +319,30 @@ export default {
     // 播放歌曲
     playSong(song) {
       console.log('播放歌曲:', song)
-      this.$emit('play', song)
+      console.log('设置 - enqueueFullPlaylist:', this.settings?.playback?.enqueueFullPlaylist)
+      
+      // 检查是否开启了"自动将全部歌单歌曲加入播放列表"功能
+      if (this.settings?.playback?.enqueueFullPlaylist && this.favoriteList.length > 0) {
+        console.log('自动加入全部歌曲到播放列表')
+        // 找到当前歌曲在列表中的索引
+        const songIndex = this.favoriteList.findIndex(s => s.hash === song.hash)
+        
+        if (songIndex !== -1) {
+          // 重新排列歌单,让当前歌曲排在第一位
+          const reorderedList = [
+            song,
+            ...this.favoriteList.slice(0, songIndex),
+            ...this.favoriteList.slice(songIndex + 1)
+          ]
+          this.$emit('play-all', reorderedList)
+        } else {
+          // 如果找不到,就正常播放全部
+          this.$emit('play-all', this.favoriteList)
+        }
+      } else {
+        // 只播放单曲
+        this.$emit('play', song)
+      }
     },
     
     // 下一首播放
