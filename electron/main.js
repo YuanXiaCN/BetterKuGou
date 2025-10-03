@@ -1,7 +1,18 @@
 // 引入 Electron 模块
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const path = require('path')
 const { spawn } = require('child_process')
+const {
+  initSettingsStore,
+  getSettings,
+  setSettings,
+  getDefaultSettings,
+  getDefaultPaths,
+  onSettingsChange,
+  exportSettings,
+  importSettings,
+  ensureCacheDirectory
+} = require('./settingsStore')
 
 // 检查是否在开发环境中（手动检测，避免 ESM 依赖问题）
 const isDev = !app.isPackaged
@@ -311,7 +322,20 @@ function createWindow() {
 }
 
 // 应用准备就绪时创建窗口
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  try {
+    await initSettingsStore(app)
+    await ensureCacheDirectory()
+  } catch (err) {
+    console.error('❌ 初始化设置存储失败:', err)
+  }
+
+  onSettingsChange((nextSettings) => {
+    BrowserWindow.getAllWindows().forEach((win) => {
+      win.webContents.send('settings:updated', nextSettings)
+    })
+  })
+
   // 启动后端服务器
   startBackendServer()
   
@@ -344,6 +368,79 @@ ipcMain.on('window-unmaximize', () => {
 ipcMain.on('window-close', () => {
   const win = BrowserWindow.getFocusedWindow()
   if (win) win.close()
+})
+
+// 设置相关 IPC 事件
+ipcMain.handle('settings:get', async () => {
+  return getSettings()
+})
+
+ipcMain.handle('settings:get-defaults', async () => {
+  return getDefaultSettings()
+})
+
+ipcMain.handle('settings:get-default-paths', async () => {
+  return getDefaultPaths()
+})
+
+ipcMain.handle('settings:set', async (_event, payload) => {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Invalid settings payload')
+  }
+  const updated = await setSettings(payload, { merge: false })
+  await ensureCacheDirectory()
+  return updated
+})
+
+ipcMain.handle('settings:export', async (_event, targetPath) => {
+  if (!targetPath) {
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: '导出设置',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      defaultPath: 'BetterKugouSettings.json'
+    })
+    if (canceled || !filePath) {
+      return { canceled: true }
+    }
+    await exportSettings(filePath)
+    return { canceled: false, path: filePath }
+  }
+  await exportSettings(targetPath)
+  return { canceled: false, path: targetPath }
+})
+
+ipcMain.handle('settings:import', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: '导入设置',
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+    properties: ['openFile']
+  })
+  if (canceled || !filePaths || filePaths.length === 0) {
+    return { canceled: true }
+  }
+  const imported = await importSettings(filePaths[0])
+  await ensureCacheDirectory()
+  return { canceled: false, settings: imported }
+})
+
+ipcMain.handle('settings:choose-directory', async (_event, options = {}) => {
+  const dialogOptions = {
+    title: options.title || '选择文件夹',
+    defaultPath: options.defaultPath || undefined,
+    properties: ['openDirectory', 'createDirectory', 'promptToCreate']
+  }
+  if (options.message) {
+    dialogOptions.message = options.message
+  }
+  if (options.buttonLabel) {
+    dialogOptions.buttonLabel = options.buttonLabel
+  }
+
+  const result = await dialog.showOpenDialog(dialogOptions)
+  if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+    return { canceled: true }
+  }
+  return { canceled: false, path: result.filePaths[0] }
 })
 
 // 当所有窗口都关闭时退出应用

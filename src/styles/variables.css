@@ -1,12 +1,14 @@
 /* 全局CSS变量 - 颜色、尺寸、字体等 */
 :root {
   /* 颜色系统 */
-  --color-primary: #7ce98b;
-  --color-primary-hover: #ee59c9;
-  --color-primary-active: #f75050;
-  
-  --color-background: #1a1a1a;
-  --color-background-light: #2c2c2c;
+  --color-primary: #377db6;   /* 主题色 */
+  --color-primary-hover: #3b55e4;   /* 悬停色 */
+  --color-primary-active: #f75050;   /* 激活色 */
+  --color-primary-light: rgba(55, 125, 182, 0.15);
+  --color-primary-rgb: 55, 125, 182;
+
+  --color-background: #1a1a1a;   /* 背景色 */
+  --color-background-light: #2c2c2c;   /* 背景色2 */
   --color-background-lighter: #3a3a3a;
   
   --color-text: #ffffff;

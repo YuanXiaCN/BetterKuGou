@@ -47,7 +47,7 @@
         class="song-item"
         :class="{ playing: currentSong && currentSong.hash === song.hash }"
         @dblclick="playSong(song)"
-        @contextmenu.prevent="showContextMenu($event, song)"
+        @contextmenu.prevent.stop="showContextMenu($event, song)"
       >
         <div class="col-index">
           <span class="index-number">{{ index + 1 }}</span>
@@ -99,6 +99,7 @@
 <script>
 import { getUserPlaylists, getPlaylistTracks } from '../api/music.js'
 import ContextMenu from './ContextMenu.vue'
+import contextMenuManager from '../utils/contextMenuManager.js'
 
 export default {
   name: 'FavoriteView',
@@ -299,12 +300,26 @@ export default {
     
     // 显示右键菜单
     showContextMenu(event, song) {
-      this.currentContextSong = song
-      this.contextMenuPosition = {
-        x: event.clientX,
-        y: event.clientY
-      }
-      this.contextMenuVisible = true
+      // 先关闭所有其他菜单
+      contextMenuManager.closeActiveMenu()
+      
+      // 然后关闭自己的旧菜单，防止瞬移
+      this.contextMenuVisible = false
+      
+      // 使用 nextTick 确保旧菜单完全关闭后再打开新菜单
+      this.$nextTick(() => {
+        this.currentContextSong = song
+        this.contextMenuPosition = {
+          x: event.clientX,
+          y: event.clientY
+        }
+        this.contextMenuVisible = true
+        
+        // 注册到全局管理器
+        contextMenuManager.registerMenu(() => {
+          this.contextMenuVisible = false
+        })
+      })
     },
     
     // 切换收藏状态

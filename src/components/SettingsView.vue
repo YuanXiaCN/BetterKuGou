@@ -21,7 +21,7 @@
       </aside>
 
       <main class="settings-main" ref="settingsMain">
-        <section class="settings-section" id="playback-section" ref="playback" data-section="playback">
+        <section class="settings-section" id="playback-section" :ref="sectionRefs.playback" data-section="playback">
           <header class="section-header">
             <h2 class="section-title">播放设置</h2>
           </header>
@@ -47,7 +47,7 @@
           </div>
         </section>
 
-  <section class="settings-section" id="download-section" ref="download" data-section="download">
+  <section class="settings-section" id="download-section" :ref="sectionRefs.download" data-section="download">
           <header class="section-header">
             <h2 class="section-title">下载与缓存</h2>
           </header>
@@ -58,7 +58,9 @@
             </div>
             <div class="setting-path">
               <input type="text" class="path-input" :value="localSettings.download.downloadPath" readonly>
-              <button class="path-btn" type="button">更改目录</button>
+              <button class="path-btn" type="button" @click="handleSelectDownloadPath" :disabled="isChoosingPath">
+                {{ isChoosingPath ? '选择中…' : '更改目录' }}
+              </button>
             </div>
           </div>
           <div class="setting-item">
@@ -68,7 +70,9 @@
             </div>
             <div class="setting-path">
               <input type="text" class="path-input" :value="localSettings.download.cachePath" readonly>
-              <button class="path-btn" type="button">更改目录</button>
+              <button class="path-btn" type="button" @click="handleSelectCachePath" :disabled="isChoosingPath">
+                {{ isChoosingPath ? '选择中…' : '更改目录' }}
+              </button>
             </div>
           </div>
           <div class="setting-item setting-item--stack">
@@ -104,13 +108,17 @@
           </div>
         </section>
 
-  <section class="settings-section" id="custom-section" ref="custom" data-section="custom">
+  <section class="settings-section" id="custom-section" :ref="sectionRefs.custom" data-section="custom">
           <header class="section-header">
             <h2 class="section-title">自定义功能</h2>
           </header>
           <div class="setting-actions">
-            <button class="outline-btn" type="button">导出设置</button>
-            <button class="outline-btn" type="button">导入设置</button>
+            <button class="outline-btn" type="button" @click="handleExportSettings" :disabled="isExporting">
+              {{ isExporting ? '导出中…' : '导出设置' }}
+            </button>
+            <button class="outline-btn" type="button" @click="handleImportSettings" :disabled="isImporting">
+              {{ isImporting ? '导入中…' : '导入设置' }}
+            </button>
           </div>
 
           <div class="setting-group">
@@ -213,19 +221,19 @@
           </div>
         </section>
 
-  <section class="settings-section" id="shortcut-section" ref="shortcuts" data-section="shortcuts">
+  <section class="settings-section" id="shortcut-section" :ref="sectionRefs.shortcuts" data-section="shortcuts">
           <header class="section-header">
             <h2 class="section-title">快捷键</h2>
           </header>
           <div class="shortcut-grid">
-            <div class="shortcut-card" v-for="shortcut in shortcuts" :key="shortcut.label">
+            <div class="shortcut-card" v-for="shortcut in shortcutList" :key="shortcut.label">
               <div class="shortcut-label">{{ shortcut.label }}</div>
               <div class="shortcut-key">{{ shortcut.key }}</div>
             </div>
           </div>
         </section>
 
-  <section class="settings-section" id="software-section" ref="software" data-section="software">
+  <section class="settings-section" id="software-section" :ref="sectionRefs.software" data-section="software">
           <header class="section-header">
             <h2 class="section-title">软件设置</h2>
           </header>
@@ -294,179 +302,289 @@
   </div>
 </template>
 
-<script>
-export default {
-  name: 'SettingsView',
-  data() {
-    return {
-      sections: [
-        { id: 'playback', label: '播放设置' },
-        { id: 'download', label: '下载与缓存' },
-        { id: 'custom', label: '自定义功能' },
-        { id: 'shortcuts', label: '快捷键' },
-        { id: 'software', label: '软件设置' }
-      ],
-      activeSection: 'playback',
-      localSettings: {
-        playback: {
-          fullscreenLyrics: true,
-          enqueueFullPlaylist: true
-        },
-        download: {
-          downloadPath: 'C:/Users/BetterKugou/Downloads',
-          cachePath: 'C:/Users/BetterKugou/AppData/Local/BetterKugou/Cache',
-          cacheSizeIndex: 0,
-          concurrentDownloads: 3
-        },
-        custom: {
-          playerStyle: 'default',
-          theme: 'dark',
-          customTheme: {
-            primary: '#667eea',
-            hover: '#764ba2',
-            background: '#1f1f1f'
-          }
-        },
-        software: {
-          autoLaunch: false,
-          restorePlaylist: true,
-          restorePlaybackState: true,
-          defaultPage: 'home'
-        }
-      },
-      containerPaddingTop: 0,
-      scrollListener: null,
-      resizeListener: null,
-      scrollRafId: null,
-      scrollContainer: null,
-      shortcuts: [
-        { label: '播放 / 暂停', key: 'Space' },
-        { label: '下一首', key: 'Ctrl + →' },
-        { label: '上一首', key: 'Ctrl + ←' },
-        { label: '老板键', key: 'Ctrl + Alt + H' }
-      ]
+<script setup>
+import { reactive, ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { useSettingsStore } from '../stores/settingsStore.js'
+import { cloneDeep, replaceReactive } from '../utils/objectUtils.js'
+
+const emit = defineEmits(['close', 'settings-changed'])
+
+const sections = [
+  { id: 'playback', label: '播放设置' },
+  { id: 'download', label: '下载与缓存' },
+  { id: 'custom', label: '自定义功能' },
+  { id: 'shortcuts', label: '快捷键' },
+  { id: 'software', label: '软件设置' }
+]
+
+const activeSection = ref('playback')
+const settingsMain = ref(null)
+const sectionRefs = {
+  playback: ref(null),
+  download: ref(null),
+  custom: ref(null),
+  shortcuts: ref(null),
+  software: ref(null)
+}
+
+const shortcutList = [
+  { label: '播放 / 暂停', key: 'Space' },
+  { label: '下一首', key: 'Ctrl + →' },
+  { label: '上一首', key: 'Ctrl + ←' },
+  { label: '老板键', key: 'Ctrl + Alt + H' }
+]
+
+const cacheSizeOptions = [
+  { value: 2048, label: '2048 MB' },
+  { value: 4096, label: '4096 MB' },
+  { value: 6144, label: '6144 MB' },
+  { value: 8192, label: '8192 MB' },
+  { value: 10240, label: '10240 MB' },
+  { value: -1, label: '无限制' }
+]
+
+const {
+  settings,
+  ready,
+  updateSettings,
+  revision,
+  exportSettings,
+  importSettings,
+  chooseDirectory
+} = useSettingsStore()
+
+const localSettings = reactive(cloneDeep(settings))
+const isSyncingFromStore = ref(false)
+const containerPaddingTop = ref(0)
+let scrollListener = null
+let resizeListener = null
+let scrollRafId = null
+let scrollContainer = null
+let saveTimer = null
+const isExporting = ref(false)
+const isImporting = ref(false)
+const isChoosingPath = ref(false)
+
+const currentCacheSizeLabel = computed(() => {
+  const index = localSettings?.download?.cacheSizeIndex ?? 0
+  return cacheSizeOptions[index]?.label || '无限制'
+})
+
+function syncFromStore() {
+  if (!ready.value) return
+  isSyncingFromStore.value = true
+  replaceReactive(localSettings, cloneDeep(settings))
+  isSyncingFromStore.value = false
+}
+
+watch(ready, (value) => {
+  if (value) {
+    syncFromStore()
+  }
+}, { immediate: true })
+
+watch(revision, () => {
+  if (isSyncingFromStore.value) return
+  syncFromStore()
+})
+
+watch(localSettings, () => {
+  if (isSyncingFromStore.value || !ready.value) return
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+  }
+  saveTimer = setTimeout(async () => {
+    try {
+      await updateSettings(cloneDeep(localSettings), { merge: false })
+      emit('settings-changed', cloneDeep(localSettings))
+    } catch (err) {
+      console.error('[SettingsView] 更新设置失败:', err)
     }
-  },
-  mounted() {
-    this.$nextTick(() => {
-      this.setupScrollTracking()
+    saveTimer = null
+  }, 200)
+}, { deep: true })
+
+function scrollToSection(sectionId) {
+  activeSection.value = sectionId
+  nextTick(() => {
+    const target = sectionRefs[sectionId]?.value
+    const container = settingsMain.value
+
+    if (!target || !container) {
+      console.warn('Target or container not found:', { target, container, sectionId })
+      return
+    }
+
+    const containerRect = container.getBoundingClientRect()
+    const targetRect = target.getBoundingClientRect()
+    const scrollTop = container.scrollTop
+    const offset = targetRect.top - containerRect.top + scrollTop
+
+    container.scrollTo({
+      top: offset - 20,
+      behavior: 'smooth'
     })
-  },
-  beforeUnmount() {
-    this.teardownScrollTracking()
-  },
-  computed: {
-    cacheSizeOptions() {
-      return [
-        { value: 2048, label: '2048 MB' },
-        { value: 4096, label: '4096 MB' },
-        { value: 6144, label: '6144 MB' },
-        { value: 8192, label: '8192 MB' },
-        { value: 10240, label: '10240 MB' },
-        { value: -1, label: '无限制' }
-      ]
-    },
-    currentCacheSizeLabel() {
-      const index = this.localSettings.download.cacheSizeIndex
-      return this.cacheSizeOptions[index]?.label || '无限制'
-    }
-  },
-  methods: {
-    scrollToSection(sectionId) {
-      this.activeSection = sectionId
-      this.$nextTick(() => {
-        const target = this.$refs[sectionId]
-        const container = this.scrollContainer || this.$refs.settingsMain
-        if (!target || !container) return
+  })
+}
 
-        const containerRect = container.getBoundingClientRect()
-        const targetRect = target.getBoundingClientRect()
-        const offset = targetRect.top - containerRect.top + container.scrollTop - this.containerPaddingTop
-
-        container.scrollTo({ top: offset, behavior: 'smooth' })
-      })
-    },
-    setupScrollTracking() {
-      const localContainer = this.$refs.settingsMain
-      if (!localContainer) return
-
-      const scrollContainer = localContainer.closest('.main-content') || localContainer
-      this.scrollContainer = scrollContainer
-
-      const computedStyle = window.getComputedStyle(localContainer)
-      this.containerPaddingTop = parseFloat(computedStyle.paddingTop) || 0
-
-      this.scrollListener = () => {
-        if (this.scrollRafId) {
-          window.cancelAnimationFrame(this.scrollRafId)
-        }
-        this.scrollRafId = window.requestAnimationFrame(() => {
-          this.updateActiveSection()
-        })
-      }
-
-      scrollContainer.addEventListener('scroll', this.scrollListener, { passive: true })
-
-      this.resizeListener = () => {
-        this.updateActiveSection()
-      }
-      window.addEventListener('resize', this.resizeListener, { passive: true })
-
-      this.updateActiveSection()
-    },
-    teardownScrollTracking() {
-      if (this.scrollContainer && this.scrollListener) {
-        this.scrollContainer.removeEventListener('scroll', this.scrollListener)
-      }
-      if (this.resizeListener) {
-        window.removeEventListener('resize', this.resizeListener)
-      }
-      if (this.scrollRafId) {
-        window.cancelAnimationFrame(this.scrollRafId)
-        this.scrollRafId = null
-      }
-      this.scrollContainer = null
-    },
-    updateActiveSection() {
-      const container = this.scrollContainer || this.$refs.settingsMain
-      if (!container) return
-
-      let closestId = null
-      let closestDistance = Infinity
-
-      this.sections.forEach(section => {
-        const el = this.$refs[section.id]
-        if (!el) return
-
-        const containerRect = container.getBoundingClientRect()
-        const targetRect = el.getBoundingClientRect()
-        const relativeTop = targetRect.top - containerRect.top + container.scrollTop - this.containerPaddingTop
-        const distance = Math.abs(relativeTop - container.scrollTop)
-
-        if (distance < closestDistance) {
-          closestDistance = distance
-          closestId = section.id
-        }
-      })
-
-      if (closestId) {
-        this.activeSection = closestId
-      }
-    }
+async function handleExportSettings() {
+  if (isExporting.value) return
+  isExporting.value = true
+  try {
+    const result = await exportSettings()
+    if (result?.canceled) return
+    console.info('[SettingsView] 设置已导出到:', result.path)
+  } catch (err) {
+    console.error('[SettingsView] 导出设置失败:', err)
+  } finally {
+    isExporting.value = false
   }
 }
+
+async function handleImportSettings() {
+  if (isImporting.value) return
+  isImporting.value = true
+  try {
+    const result = await importSettings()
+    if (result?.canceled) return
+    console.info('[SettingsView] 设置导入成功')
+  } catch (err) {
+    console.error('[SettingsView] 导入设置失败:', err)
+  } finally {
+    isImporting.value = false
+  }
+}
+
+async function handleSelectPath(type) {
+  if (isChoosingPath.value) return
+  isChoosingPath.value = true
+  try {
+    const currentValue = type === 'download'
+      ? localSettings.download.downloadPath
+      : localSettings.download.cachePath
+
+    const result = await chooseDirectory({
+      title: type === 'download' ? '选择下载目录' : '选择缓存目录',
+      defaultPath: currentValue || undefined,
+      buttonLabel: '选择'
+    })
+    if (result?.canceled || !result?.path) return
+
+    if (type === 'download') {
+      localSettings.download.downloadPath = result.path
+    } else {
+      localSettings.download.cachePath = result.path
+    }
+  } catch (err) {
+    console.error('[SettingsView] 选择目录失败:', err)
+  } finally {
+    isChoosingPath.value = false
+  }
+}
+
+function handleSelectDownloadPath() {
+  return handleSelectPath('download')
+}
+
+function handleSelectCachePath() {
+  return handleSelectPath('cache')
+}
+
+function updateActiveSection() {
+  const container = scrollContainer || settingsMain.value
+  if (!container) return
+
+  let closestId = null
+  let closestDistance = Infinity
+  const containerRect = container.getBoundingClientRect()
+
+  sections.forEach((section) => {
+    const el = sectionRefs[section.id]?.value
+    if (!el) return
+
+    const targetRect = el.getBoundingClientRect()
+    const relativeTop = targetRect.top - containerRect.top + container.scrollTop - containerPaddingTop.value
+    const distance = Math.abs(relativeTop - container.scrollTop)
+
+    if (distance < closestDistance) {
+      closestDistance = distance
+      closestId = section.id
+    }
+  })
+
+  if (closestId) {
+    activeSection.value = closestId
+  }
+}
+
+function setupScrollTracking() {
+  const container = settingsMain.value
+  if (!container) return
+
+  scrollContainer = container
+
+  const computedStyle = window.getComputedStyle(container)
+  containerPaddingTop.value = parseFloat(computedStyle.paddingTop) || 0
+
+  scrollListener = () => {
+    if (scrollRafId) {
+      window.cancelAnimationFrame(scrollRafId)
+    }
+    scrollRafId = window.requestAnimationFrame(() => {
+      updateActiveSection()
+    })
+  }
+
+  container.addEventListener('scroll', scrollListener, { passive: true })
+
+  resizeListener = () => {
+    updateActiveSection()
+  }
+  window.addEventListener('resize', resizeListener, { passive: true })
+
+  updateActiveSection()
+}
+
+function teardownScrollTracking() {
+  if (scrollContainer && scrollListener) {
+    scrollContainer.removeEventListener('scroll', scrollListener)
+  }
+  if (resizeListener) {
+    window.removeEventListener('resize', resizeListener)
+  }
+  if (scrollRafId) {
+    window.cancelAnimationFrame(scrollRafId)
+    scrollRafId = null
+  }
+  scrollContainer = null
+}
+
+onMounted(() => {
+  nextTick(() => {
+    setupScrollTracking()
+  })
+})
+
+onBeforeUnmount(() => {
+  teardownScrollTracking()
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+})
+
+defineExpose({
+  scrollToSection
+})
 </script>
 
 <style scoped>
 .settings-view {
-  position: relative;
+  width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--color-background);
-  min-height: 0;
-  padding: var(--spacing-xl);
-  overflow: hidden;
 }
 
 .settings-view > * {
@@ -493,13 +611,14 @@ export default {
 .settings-body {
   flex: 1;
   display: flex;
-  align-items: stretch;
-  min-height: 0;
+  align-items: flex-start;
   gap: var(--spacing-xl);
   width: 100%;
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
-  padding: var(--spacing-xl) var(--spacing-2xl);
+  padding: var(--spacing-xl);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .settings-sidebar {
@@ -509,17 +628,30 @@ export default {
   flex-direction: column;
   justify-content: space-between;
   gap: var(--spacing-xl);
-  background: var(--color-background);
-  border: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
-  border-radius: calc(var(--radius-xl, 20px) * 1.1);
-  box-shadow: 0 22px 55px rgba(15, 18, 32, 0.22);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  position: static;
-  top: auto;
-  height: auto;
-  align-self: flex-start;
-  overflow: hidden;
+  background: var(--color-background-light);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
+  position: sticky;
+  top: var(--spacing-xl);
+  height: fit-content;
+  max-height: calc(100vh - 180px); /* 减去顶部标题栏、底部播放器等空间 */
+  overflow-y: auto;
+}
+
+/* 左侧导航栏滚动条样式 */
+.settings-sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.settings-sidebar::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+.settings-sidebar::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-secondary);
 }
 
 .sidebar-nav {
@@ -527,8 +659,8 @@ export default {
   flex-direction: column;
   gap: var(--spacing-sm);
   padding: var(--spacing-sm);
-  border-radius: calc(var(--radius-lg, 16px));
-  background: color-mix(in srgb, var(--color-background) 65%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--color-background);
 }
 
 .sidebar-item {
@@ -567,7 +699,7 @@ export default {
 .sidebar-item:hover,
 .sidebar-item.active {
   color: var(--color-primary);
-  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  background: var(--color-primary-light);
 }
 
 .sidebar-item:hover::before,
@@ -577,7 +709,7 @@ export default {
 }
 
 .sidebar-item.active {
-  box-shadow: inset 4px 0 0 color-mix(in srgb, var(--color-primary) 65%, transparent);
+  box-shadow: none;
 }
 
 .sidebar-item:hover {
@@ -590,15 +722,15 @@ export default {
   align-items: center;
   gap: var(--spacing-sm);
   padding: var(--spacing-lg);
-  background: color-mix(in srgb, var(--color-background) 60%, transparent);
-  border-radius: calc(var(--radius-lg, 16px));
+  background: var(--color-background);
+  border-radius: var(--radius-md);
 }
 
 .sidebar-logo img {
   width: 64px;
   height: 64px;
-  border-radius: var(--radius-lg);
-  box-shadow: 0 12px 32px rgba(102, 126, 234, 0.35);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .sidebar-logo span {
@@ -610,25 +742,23 @@ export default {
 
 .settings-main {
   flex: 1;
-  padding: var(--spacing-xl) var(--spacing-2xl);
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-2xl);
-  background: var(--color-background-light);
-  border-radius: calc(var(--radius-xl, 20px) * 1.05);
-  border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
-  box-shadow: 0 24px 60px rgba(15, 18, 32, 0.18);
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
+  gap: var(--spacing-xl);
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: calc(100vh - 180px);
 }
 
+/* 主内容滚动条样式 */
 .settings-main::-webkit-scrollbar {
   width: 8px;
 }
 
 .settings-main::-webkit-scrollbar-track {
-  background: var(--color-background);
+  background: transparent;
 }
 
 .settings-main::-webkit-scrollbar-thumb {
@@ -636,27 +766,27 @@ export default {
   border-radius: 4px;
 }
 
+.settings-main::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-secondary);
+}
+
 .settings-section {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--spacing-lg);
-  padding: var(--spacing-xl) calc(var(--spacing-xl) + 8px);
-  border-radius: clamp(20px, var(--radius-xl, 22px) * 1.15, 32px);
-  border: 1px solid color-mix(in srgb, var(--color-border) 45%, transparent);
+  padding: var(--spacing-xl);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
   background: var(--color-background-light);
-  box-shadow: 0 25px 50px rgba(12, 18, 38, 0.18);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  overflow: hidden;
-  transition: transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1), box-shadow 0.4s ease, border-color 0.4s ease;
-  z-index: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
 .settings-section:hover {
-  transform: translateY(-6px);
-  box-shadow: 0 30px 65px rgba(16, 20, 40, 0.22);
-  border-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border-color: var(--color-primary);
 }
 
 .settings-section > * {
@@ -672,29 +802,10 @@ export default {
 }
 
 .section-title {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-xs) var(--spacing-md);
-  border-radius: 999px;
   font-size: var(--font-size-lg);
-  font-weight: 700;
-  letter-spacing: 0.02em;
+  font-weight: 600;
   color: var(--color-text);
   margin: 0;
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.18) 0%, rgba(118, 75, 162, 0.28) 100%);
-  border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
-}
-
-.section-title::after {
-  content: '';
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
-  box-shadow: 0 0 16px rgba(102, 126, 234, 0.6);
 }
 
 .setting-item {
@@ -703,16 +814,11 @@ export default {
   justify-content: space-between;
   gap: var(--spacing-lg);
   padding: var(--spacing-lg);
-  background: var(--color-background-light);
-  border: 1px solid color-mix(in srgb, var(--color-border) 45%, transparent);
-  border-radius: clamp(18px, var(--radius-lg, 18px) * 1.2, 28px);
-  box-shadow: 0 12px 30px rgba(12, 18, 38, 0.12);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  position: relative;
-  overflow: hidden;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   margin-bottom: var(--spacing-md);
-  transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+  transition: all var(--transition-fast);
 }
 
 .setting-item > * {
@@ -720,9 +826,8 @@ export default {
   z-index: 1;
 }
 .setting-item:hover {
-  transform: translateY(-3px);
-  border-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
-  box-shadow: 0 16px 36px rgba(12, 18, 38, 0.18);
+  border-color: var(--color-primary);
+  background: var(--color-background-light);
 }
 
 .setting-item--stack {
@@ -793,12 +898,11 @@ export default {
 .path-input {
   flex: 1;
   padding: var(--spacing-sm) var(--spacing-md);
-  background: color-mix(in srgb, var(--color-background) 82%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
-  border-radius: calc(var(--radius-md, 14px));
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
   color: var(--color-text);
   font-size: var(--font-size-sm);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .path-btn {
@@ -808,21 +912,20 @@ export default {
   justify-content: center;
   gap: var(--spacing-xs);
   padding: var(--spacing-sm) var(--spacing-lg);
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: var(--color-primary);
   color: #fff;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;
-  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  transition: all var(--transition-fast);
   white-space: nowrap;
-  box-shadow: 0 10px 24px rgba(102, 126, 234, 0.35);
 }
 
 .path-btn:hover {
-  transform: translateY(-2px) scale(1.02);
-  box-shadow: 0 14px 28px rgba(102, 126, 234, 0.42);
+  background: var(--color-primary-hover);
+  transform: translateY(-1px);
 }
 
 .setting-slider {
@@ -837,44 +940,45 @@ export default {
   height: 8px;
   -webkit-appearance: none;
   appearance: none;
-  background: linear-gradient(90deg, rgba(102, 126, 234, 0.6) 0%, rgba(118, 75, 162, 0.6) 100%);
+  background: var(--color-primary-light);
   border-radius: 999px;
   outline: none;
   position: relative;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 .setting-slider input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #f5f7ff 0%, #dae0ff 100%);
-  border: 3px solid rgba(255, 255, 255, 0.6);
-  box-shadow: 0 8px 16px rgba(102, 126, 234, 0.35);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  background: var(--color-primary);
+  border: 2px solid #fff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  transition: all var(--transition-fast);
 }
 
 .setting-slider input[type='range']::-webkit-slider-thumb:hover {
-  transform: scale(1.08);
-  box-shadow: 0 10px 24px rgba(102, 126, 234, 0.45);
+  transform: scale(1.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .setting-slider input[type='range']::-moz-range-track {
   height: 8px;
   border-radius: 999px;
-  background: linear-gradient(90deg, rgba(102, 126, 234, 0.6) 0%, rgba(118, 75, 162, 0.6) 100%);
+  background: var(--color-primary-light);
 }
 
 .setting-slider input[type='range']::-moz-range-thumb {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
-  border: 3px solid rgba(255, 255, 255, 0.6);
-  background: linear-gradient(135deg, #f5f7ff 0%, #dae0ff 100%);
-  box-shadow: 0 8px 16px rgba(102, 126, 234, 0.35);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  border: 2px solid #fff;
+  background: var(--color-primary);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  transition: all var(--transition-fast);
 }
 
 .slider-scale {
@@ -887,19 +991,18 @@ export default {
 .number-input {
   width: 88px;
   padding: var(--spacing-sm) var(--spacing-md);
-  border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
-  border-radius: calc(var(--radius-md, 14px));
-  background: color-mix(in srgb, var(--color-background) 85%, transparent);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-background);
   color: var(--color-text);
   font-size: var(--font-size-base);
   text-align: center;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .number-input:focus {
   border-color: var(--color-primary);
   outline: none;
-  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+  box-shadow: 0 0 0 2px var(--color-primary-light);
 }
 
 .number-input::-webkit-outer-spin-button,
@@ -926,22 +1029,20 @@ export default {
   align-items: center;
   gap: var(--spacing-xs);
   padding: var(--spacing-sm) var(--spacing-xl);
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
-  background: linear-gradient(140deg, rgba(255, 255, 255, 0.05) 0%, rgba(118, 75, 162, 0.08) 100%);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-background);
   color: var(--color-text);
   font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;
-  transition: transform 0.25s ease, color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
-  box-shadow: 0 10px 22px rgba(20, 24, 40, 0.15);
+  transition: all var(--transition-fast);
 }
 
 .outline-btn:hover {
-  border-color: color-mix(in srgb, var(--color-primary) 40%, transparent);
+  border-color: var(--color-primary);
   color: var(--color-primary);
-  transform: translateY(-2px);
-  box-shadow: 0 14px 28px rgba(102, 126, 234, 0.24);
+  background: var(--color-primary-light);
 }
 
 .radio-group {
@@ -950,10 +1051,9 @@ export default {
   flex-wrap: wrap;
   gap: var(--spacing-sm);
   padding: var(--spacing-sm);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--color-background-light) 70%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-border) 40%, transparent);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-md);
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
 }
 
 .radio-option {
@@ -993,7 +1093,7 @@ export default {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.18) 0%, rgba(118, 75, 162, 0.22) 100%);
+  background: var(--color-primary-light);
   opacity: 0;
   transform: scale(0.9);
   transition: opacity 0.3s ease, transform 0.3s ease;
@@ -1005,8 +1105,7 @@ export default {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  border: 2px solid color-mix(in srgb, var(--color-border) 55%, transparent);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  border: 2px solid var(--color-border);
   transition: border-color 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
 }
 
@@ -1019,7 +1118,7 @@ export default {
 }
 
 .radio-option:hover .radio-option__dot {
-  border-color: color-mix(in srgb, var(--color-primary) 45%, transparent);
+  border-color: var(--color-primary);
 }
 
 .radio-option input:focus-visible + .radio-option__display {
@@ -1037,10 +1136,10 @@ export default {
 
 .radio-option input:checked + .radio-option__display .radio-option__dot {
   border-color: transparent;
-  transform: scale(1.45);
-  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.18), 0 12px 22px rgba(102, 126, 234, 0.25);
-  background: radial-gradient(circle at center, #ffffff 0%, rgba(102, 126, 234, 0.6) 100%);
-  animation: radio-pop 0.36s ease;
+  transform: scale(1.2);
+  box-shadow: 0 0 0 3px var(--color-primary-light);
+  background: var(--color-primary);
+  animation: radio-pop 0.3s ease;
 }
 
 .radio-option input:checked + .radio-option__display .radio-option__label {
@@ -1049,13 +1148,13 @@ export default {
 
 @keyframes radio-pop {
   0% {
-    transform: scale(0.6);
+    transform: scale(0.8);
   }
-  55% {
-    transform: scale(1.35);
+  50% {
+    transform: scale(1.3);
   }
   100% {
-    transform: scale(1.1);
+    transform: scale(1.2);
   }
 }
 
@@ -1082,7 +1181,7 @@ export default {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: rgba(102, 126, 234, 0.15);
+  background: var(--color-primary-light);
   color: var(--color-primary);
   font-size: 12px;
   cursor: help;
@@ -1103,22 +1202,19 @@ export default {
 
 .shortcut-card {
   padding: var(--spacing-lg);
-  background: color-mix(in srgb, var(--color-background-light) 80%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-border) 45%, transparent);
-  border-radius: clamp(18px, var(--radius-lg, 18px) * 1.1, 26px);
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   display: flex;
   flex-direction: column;
   gap: var(--spacing-xs);
-  box-shadow: 0 14px 26px rgba(16, 20, 40, 0.16);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+  transition: all var(--transition-fast);
 }
 
 .shortcut-card:hover {
-  transform: translateY(-4px);
-  border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
-  box-shadow: 0 20px 40px rgba(102, 126, 234, 0.25);
+  border-color: var(--color-primary);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .shortcut-label {
@@ -1135,9 +1231,8 @@ export default {
 .software-logo {
   width: 96px;
   height: 96px;
-  border-radius: 28px;
-  box-shadow: 0 18px 36px rgba(102, 126, 234, 0.32);
-  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 /* 开关样式 */
@@ -1164,7 +1259,6 @@ export default {
   background-color: var(--color-border);
   transition: 0.3s;
   border-radius: 24px;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.18);
 }
 
 .slider:before {
@@ -1181,8 +1275,7 @@ export default {
 }
 
 input:checked + .slider {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  box-shadow: 0 8px 16px rgba(102, 126, 234, 0.35);
+  background: var(--color-primary);
 }
 
 input:checked + .slider:before {

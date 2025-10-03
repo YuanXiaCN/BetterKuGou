@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import TitleBar from './components/TitleBar.vue'
 import LoginView from './components/LoginView.vue'
 import Sidebar from './components/Sidebar.vue'
@@ -9,6 +9,8 @@ import SettingsView from './components/SettingsView.vue'
 import MusicPlayer from './components/MusicPlayer.vue'
 import { getLoginInfo, isLoggedIn } from './api/auth.js'
 import { getUserPlaylists } from './api/music.js'
+import { useSettingsStore } from './stores/settingsStore.js'
+import { cloneDeep } from './utils/objectUtils.js'
 
 console.log('App.vue loaded')
 
@@ -219,6 +221,20 @@ const handleClearPlaylist = async () => {
 // MusicPlayer组件的ref
 const musicPlayerRef = ref(null)
 
+const {
+  settings,
+  ready: settingsReady,
+  saveSessionSnapshot,
+  getSessionSnapshot,
+  defaults: getSettingsDefaults
+} = useSettingsStore()
+
+const defaultSessionTemplate = cloneDeep(getSettingsDefaults().session)
+const hasAppliedDefaultPage = ref(false)
+const hasRestoredSession = ref(false)
+let sessionPersistTimer = null
+let isRestoringSession = false
+
 // 歌词界面显示状态
 const isLyricViewVisible = ref(false)
 
@@ -249,6 +265,9 @@ const handleSongChanged = (song) => {
   if (index !== -1) {
     playlistIndex.value = index
   }
+  if (settings.playback?.fullscreenLyrics && musicPlayerRef.value?.showLyrics) {
+    musicPlayerRef.value.showLyrics()
+  }
 }
 
 // 切换播放列表显示
@@ -266,7 +285,270 @@ const handleToggleFavorite = (song) => {
 // 应用启动时检查登录状态
 onMounted(() => {
   checkLoginStatus()
+  if (typeof window !== 'undefined') {
+    window.addEventListener('beforeunload', handleBeforeUnload)
+  }
 })
+
+onBeforeUnmount(() => {
+  if (sessionPersistTimer) {
+    clearTimeout(sessionPersistTimer)
+    sessionPersistTimer = null
+  }
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('beforeunload', handleBeforeUnload)
+  }
+})
+
+function applyDefaultPage(page) {
+  const desired = page === 'favorites' && !userLoggedIn.value ? 'home' : page
+  const normalizedDesired = desired === 'favorites' ? 'favorite' : desired
+
+  if (!hasAppliedDefaultPage.value) {
+    if (normalizedDesired && normalizedDesired !== currentView.value) {
+      currentView.value = normalizedDesired
+    }
+    hasAppliedDefaultPage.value = true
+    return
+  }
+
+  if (!normalizedDesired || showSettings.value) return
+  if (!['home', 'favorite'].includes(currentView.value)) return
+
+  if (normalizedDesired === 'favorite' && !userLoggedIn.value) {
+    currentView.value = 'home'
+    return
+  }
+
+  if (normalizedDesired !== currentView.value) {
+    currentView.value = normalizedDesired
+  }
+}
+
+watch(
+  [settingsReady, () => settings.software?.defaultPage],
+  ([ready, page]) => {
+    if (!ready) return
+    applyDefaultPage(page)
+  },
+  { immediate: true }
+)
+
+function shouldPersistSession() {
+  return Boolean(settings.software?.restorePlaylist || settings.software?.restorePlaybackState)
+}
+
+function collectSessionSnapshot() {
+  const snapshot = {}
+  if (settings.software?.restorePlaylist) {
+    snapshot.playlist = cloneDeep(playlist.value)
+    snapshot.playlistIndex = playlistIndex.value
+    snapshot.currentSong = cloneDeep(currentSong.value)
+  }
+
+  if (settings.software?.restorePlaybackState) {
+    const player = musicPlayerRef.value
+    const audio = player?.$refs?.audioPlayer
+    snapshot.playbackState = {
+      isPlaying: player?.isPlaying ?? false,
+      currentTime: audio?.currentTime ?? 0,
+      duration: audio?.duration ?? 0,
+      volume: player?.volume ?? 80,
+      playMode: player?.playMode ?? 'loop'
+    }
+  }
+
+  return snapshot
+}
+
+function queueSessionPersist({ immediate = false } = {}) {
+  if (!settingsReady.value) return
+
+  if (!shouldPersistSession()) {
+    return
+  }
+
+  const persist = async () => {
+    const snapshot = collectSessionSnapshot()
+    const hasPlaylistData = Object.prototype.hasOwnProperty.call(snapshot, 'playlist')
+    const hasPlaybackState = Object.prototype.hasOwnProperty.call(snapshot, 'playbackState')
+    if (!hasPlaylistData && !hasPlaybackState) return
+    try {
+      await saveSessionSnapshot(snapshot)
+    } catch (err) {
+      console.error('[App] 保存播放会话失败:', err)
+    }
+  }
+
+  if (immediate) {
+    void persist()
+    return
+  }
+
+  if (sessionPersistTimer) {
+    clearTimeout(sessionPersistTimer)
+  }
+  sessionPersistTimer = setTimeout(() => {
+    sessionPersistTimer = null
+    void persist()
+  }, 300)
+}
+
+async function applyPlaybackSession(state) {
+  if (!state) return
+  const player = musicPlayerRef.value
+  const audio = player?.$refs?.audioPlayer
+  if (!player || !audio) return
+
+  const applyState = () => {
+    if (state.playMode) {
+      player.playMode = state.playMode
+    }
+    if (typeof state.volume === 'number') {
+      player.volume = state.volume
+      audio.volume = Math.min(1, Math.max(0, state.volume / 100))
+    }
+    if (typeof state.currentTime === 'number') {
+      const targetTime = Math.max(0, state.currentTime)
+      audio.currentTime = Number.isFinite(targetTime) ? targetTime : 0
+      player.currentTime = audio.currentTime
+    }
+    if (typeof state.duration === 'number') {
+      player.duration = state.duration
+    }
+    if (state.isPlaying) {
+      audio.play().catch(() => {})
+      player.isPlaying = true
+    } else {
+      audio.pause()
+      player.isPlaying = false
+    }
+  }
+
+  if (audio.readyState >= 1) {
+    applyState()
+    return
+  }
+
+  const handleLoaded = () => {
+    audio.removeEventListener('loadedmetadata', handleLoaded)
+    audio.removeEventListener('loadeddata', handleLoaded)
+    applyState()
+  }
+
+  audio.addEventListener('loadedmetadata', handleLoaded)
+  audio.addEventListener('loadeddata', handleLoaded)
+}
+
+async function restoreSessionIfNeeded() {
+  if (hasRestoredSession.value || !settingsReady.value) return
+  const session = getSessionSnapshot()
+  const shouldRestorePlaylist = Boolean(settings.software?.restorePlaylist && Array.isArray(session.playlist) && session.playlist.length > 0)
+  const shouldRestorePlayback = Boolean(settings.software?.restorePlaybackState && session.playbackState)
+
+  if (!shouldRestorePlaylist && !shouldRestorePlayback) {
+    hasRestoredSession.value = true
+    return
+  }
+
+  isRestoringSession = true
+  try {
+    if (shouldRestorePlaylist) {
+      playlist.value = cloneDeep(session.playlist)
+      const playlistLength = playlist.value.length
+      const targetIndex = Math.min(Math.max(session.playlistIndex ?? 0, 0), Math.max(playlistLength - 1, 0))
+      playlistIndex.value = playlistLength > 0 ? targetIndex : 0
+      const fallbackSong = playlistLength > 0 ? (session.playlist?.[targetIndex] || session.playlist?.[0] || null) : null
+      currentSong.value = cloneDeep(session.currentSong || fallbackSong)
+    }
+
+    await nextTick()
+
+    if (shouldRestorePlayback) {
+      await applyPlaybackSession(session.playbackState)
+    }
+
+    hasRestoredSession.value = true
+  } finally {
+    isRestoringSession = false
+  }
+}
+
+watch(
+  [settingsReady, () => settings.session, () => settings.software?.restorePlaylist, () => settings.software?.restorePlaybackState],
+  () => {
+    void restoreSessionIfNeeded()
+  },
+  { immediate: true }
+)
+
+watch(
+  () => settings.playback?.fullscreenLyrics,
+  (enabled) => {
+    if (!enabled && isLyricViewVisible.value && musicPlayerRef.value?.closeLyrics) {
+      musicPlayerRef.value.closeLyrics()
+    }
+  }
+)
+
+watch(playlist, () => {
+  if (isRestoringSession) return
+  queueSessionPersist()
+}, { deep: true })
+
+watch(currentSong, () => {
+  if (isRestoringSession) return
+  queueSessionPersist({ immediate: true })
+})
+
+watch(playlistIndex, () => {
+  if (isRestoringSession) return
+  queueSessionPersist({ immediate: true })
+})
+
+watch(
+  () => musicPlayerRef.value?.isPlaying,
+  () => {
+    if (isRestoringSession) return
+    queueSessionPersist({ immediate: true })
+  }
+)
+
+watch(
+  () => settings.software?.restorePlaylist,
+  (enabled) => {
+    if (!settingsReady.value) return
+    if (!enabled) {
+      void saveSessionSnapshot({
+        playlist: [],
+        playlistIndex: 0,
+        currentSong: null
+      })
+    } else {
+      queueSessionPersist({ immediate: true })
+    }
+  },
+  { immediate: true }
+)
+
+watch(
+  () => settings.software?.restorePlaybackState,
+  (enabled) => {
+    if (!settingsReady.value) return
+    if (!enabled) {
+      void saveSessionSnapshot({
+        playbackState: cloneDeep(defaultSessionTemplate.playbackState)
+      })
+    } else {
+      queueSessionPersist({ immediate: true })
+    }
+  },
+  { immediate: true }
+)
+
+function handleBeforeUnload() {
+  queueSessionPersist({ immediate: true })
+}
 </script>
 
 <template>

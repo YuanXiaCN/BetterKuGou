@@ -45,7 +45,7 @@
       <!-- 中间：播放控制 -->
       <div class="player-controls-section">
         <div class="control-buttons">
-          <button class="control-btn" @click="playPrevious" title="上一曲">
+          <button class="control-btn" @click="playPrevious" :disabled="isSwitchingSong" title="上一曲">
             <svg viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor">
               <path d="M793.6 150.4c-12.8 0-25.6 4.8-35.2 14.4L416 480v-288c0-19.2-16-35.2-35.2-35.2s-35.2 16-35.2 35.2v646.4c0 19.2 16 35.2 35.2 35.2s35.2-16 35.2-35.2V544l342.4 315.2c9.6 9.6 22.4 14.4 35.2 14.4 19.2 0 35.2-16 35.2-35.2V185.6c0-19.2-16-35.2-35.2-35.2z"/>
             </svg>
@@ -60,7 +60,7 @@
             </svg>
           </button>
           
-          <button class="control-btn" @click="playNext" title="下一曲">
+          <button class="control-btn" @click="playNext" :disabled="isSwitchingSong" title="下一曲">
             <svg viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor">
               <path d="M230.4 150.4c12.8 0 25.6 4.8 35.2 14.4L608 480v-288c0-19.2 16-35.2 35.2-35.2s35.2 16 35.2 35.2v646.4c0 19.2-16 35.2-35.2 35.2s-35.2-16-35.2-35.2V544L265.6 859.2c-9.6 9.6-22.4 14.4-35.2 14.4-19.2 0-35.2-16-35.2-35.2V185.6c0-19.2 16-35.2 35.2-35.2z"/>
             </svg>
@@ -73,7 +73,7 @@
         <button 
           class="icon-btn" 
           @click="togglePlayMode" 
-          @contextmenu.prevent="showPlayModeMenu"
+          @contextmenu.prevent.stop="showPlayModeMenu"
           :title="playModeText"
         >
           <img v-if="playMode === 'loop'" :src="repeatAllIcon" alt="列表循环" width="18" height="18" />
@@ -111,6 +111,7 @@
       @ended="handleEnded"
       @play="handlePlay"
       @pause="handlePause"
+      @timeupdate="handleTimeUpdate"
     ></audio>
     
     <!-- 播放列表抽屉 -->
@@ -161,6 +162,7 @@ import { getSongUrl, getLyric, getSongDetail } from '../api/music.js'
 import PlaylistDrawer from './PlaylistDrawer.vue'
 import ContextMenu from './ContextMenu.vue'
 import LyricView from './LyricView.vue'
+import contextMenuManager from '../utils/contextMenuManager.js'
 
 // 动态导入 SVG 图标
 import playlistIcon from '../icon/playlist.svg'
@@ -222,6 +224,11 @@ export default {
       // 歌词相关
       showLyricView: false, // 是否显示歌词界面
       currentLyrics: '', // 当前歌词内容
+      // MediaSession 相关
+      lastPositionUpdate: null, // 上次位置更新的时间（秒）
+      // 切歌控制
+      isSwitchingSong: false, // 是否正在切歌（防止并发）
+      switchSongDebounceTimer: null, // 切歌防抖定时器
       // RAF 循环
       rafId: null // requestAnimationFrame ID
     }
@@ -265,8 +272,15 @@ export default {
         if (newSong) {
           // 如果新歌曲与当前播放的歌曲相同，不重新加载
           if (this.currentSong && this.currentSong.hash === newSong.hash) {
+            console.log('🔄 歌曲相同，跳过重复加载:', newSong.name || newSong.filename)
             return
           }
+          // ⚠️ 检查是否正在切歌中，避免冲突
+          if (this.isSwitchingSong) {
+            console.log('⚠️ 正在切歌中，忽略外部 song prop 变化')
+            return
+          }
+          console.log('📻 外部传入新歌曲，加载:', newSong.name || newSong.filename)
           this.currentSong = newSong
           this.loadSong(newSong)
         }
@@ -286,7 +300,7 @@ export default {
     // 监听当前播放索引变化，记录播放顺序
     currentIndex: {
       handler(newIndex, oldIndex) {
-        if (newIndex !== -1 && oldIndex !== newIndex && !this.isNavigatingHistory) {
+        if (newIndex !== -1 && oldIndex !== newIndex && !this.isNavigatingHistory && !this.isSwitchingSong) {
           // 如果我们在历史中间，需要截断后面的历史
           if (this.historyPointer !== -1) {
             this.playOrderHistory = this.playOrderHistory.slice(0, this.historyPointer + 1)
@@ -305,11 +319,12 @@ export default {
           
           // 重置指针到最新位置
           this.historyPointer = -1
-          
-          // 通知父组件当前播放的歌曲已改变
-          if (this.playlist[newIndex]) {
-            this.$emit('song-changed', this.playlist[newIndex])
-          }
+        }
+        
+        // ⚠️ 注意：不在这里触发 loadSong，由 playNext/playPrevious 等方法直接调用
+        // 只在索引改变后通知父组件（但不触发重复加载）
+        if (newIndex !== -1 && this.playlist[newIndex] && !this.isSwitchingSong) {
+          this.$emit('song-changed', this.playlist[newIndex])
         }
       }
     }
@@ -580,9 +595,24 @@ export default {
     async playPrevious() {
       if (this.playlist.length === 0) return
       
+      // 防止并发切歌
+      if (this.isSwitchingSong) {
+        console.warn('⚠️ 正在切歌中，忽略本次请求')
+        return
+      }
+      
+      // 清除防抖定时器
+      if (this.switchSongDebounceTimer) {
+        clearTimeout(this.switchSongDebounceTimer)
+      }
+      
+      // 设置切歌锁
+      this.isSwitchingSong = true
+      console.log('🔒 开始切歌（上一曲），已加锁')
+      
       const originalIndex = this.currentIndex
       let attempts = 0
-      const maxAttempts = this.playlist.length // 最多尝试所有歌曲
+      const maxAttempts = Math.min(5, this.playlist.length) // 最多尝试5首歌，避免无限循环
       
       this.isNavigatingHistory = true // 设置导航标志
       
@@ -629,7 +659,15 @@ export default {
           }
           
           const nextSong = this.playlist[this.currentIndex]
-          console.log(`尝试播放上一曲 (${attempts + 1}/${maxAttempts}):`, nextSong.name, '索引:', this.currentIndex)
+          console.log(`尝试播放上一曲 (${attempts + 1}/${maxAttempts}):`, nextSong.name || nextSong.filename, '索引:', this.currentIndex)
+          
+          // 验证歌曲是否有效（必须有 hash）
+          if (!nextSong.hash) {
+            console.warn('⚠️ 歌曲缺少 hash，跳过:', nextSong)
+            await new Promise(resolve => setTimeout(resolve, 300))
+            attempts++
+            continue
+          }
           
           const success = await this.loadSong(nextSong)
           if (success) {
@@ -638,6 +676,8 @@ export default {
           }
           
           console.warn('❌ 上一曲加载失败，尝试下一首...')
+          // 添加短暂延迟，避免过快切换
+          await new Promise(resolve => setTimeout(resolve, 500))
           attempts++
         }
         
@@ -647,6 +687,11 @@ export default {
         this.showError('播放列表中没有可播放的歌曲')
       } finally {
         this.isNavigatingHistory = false // 重置导航标志
+        // 解除切歌锁，添加防抖延迟
+        this.switchSongDebounceTimer = setTimeout(() => {
+          this.isSwitchingSong = false
+          console.log('🔓 切歌完成，已解锁')
+        }, 300)
       }
     },
     
@@ -654,9 +699,25 @@ export default {
     async playNext() {
       if (this.playlist.length === 0) return
       
-      const originalIndex = this.currentIndex
-      let attempts = 0
-      const maxAttempts = this.playlist.length // 最多尝试所有歌曲
+      // 防止并发切歌
+      if (this.isSwitchingSong) {
+        console.warn('⚠️ 正在切歌中，忽略本次请求')
+        return
+      }
+      
+      // 清除防抖定时器
+      if (this.switchSongDebounceTimer) {
+        clearTimeout(this.switchSongDebounceTimer)
+      }
+      
+      // 设置切歌锁
+      this.isSwitchingSong = true
+      console.log('🔒 开始切歌（下一曲），已加锁')
+      
+      try {
+        const originalIndex = this.currentIndex
+        let attempts = 0
+        const maxAttempts = Math.min(5, this.playlist.length) // 最多尝试5首歌，避免无限循环
       
       while (attempts < maxAttempts) {
         // 先检查"下一首播放"队列
@@ -705,7 +766,15 @@ export default {
         }
         
         const nextSong = this.playlist[this.currentIndex]
-        console.log(`尝试播放下一曲 (${attempts + 1}/${maxAttempts}):`, nextSong.name, '索引:', this.currentIndex)
+        console.log(`尝试播放下一曲 (${attempts + 1}/${maxAttempts}):`, nextSong.name || nextSong.filename, '索引:', this.currentIndex)
+        
+        // 验证歌曲是否有效（必须有 hash）
+        if (!nextSong.hash) {
+          console.warn('⚠️ 歌曲缺少 hash，跳过:', nextSong)
+          await new Promise(resolve => setTimeout(resolve, 300))
+          attempts++
+          continue
+        }
         
         const success = await this.loadSong(nextSong)
         if (success) {
@@ -714,6 +783,8 @@ export default {
         }
         
         console.warn('❌ 下一曲加载失败，尝试下一首...')
+        // 添加短暂延迟，避免过快切换
+        await new Promise(resolve => setTimeout(resolve, 500))
         attempts++
       }
       
@@ -721,6 +792,13 @@ export default {
       console.error('所有歌曲都无法播放')
       this.currentIndex = originalIndex
       this.showError('播放列表中没有可播放的歌曲')
+      } finally {
+        // 解除切歌锁，添加防抖延迟
+        this.switchSongDebounceTimer = setTimeout(() => {
+          this.isSwitchingSong = false
+          console.log('🔓 切歌完成，已解锁')
+        }, 300)
+      }
     },
     
     // RAF 驱动的高频时间更新（60fps）
@@ -751,6 +829,8 @@ export default {
     // 元数据加载完成
     handleLoadedMetadata() {
       this.duration = this.$refs.audioPlayer.duration
+      // 初始化 MediaSession 位置状态
+      this.updatePositionState()
     },
     
     // 播放结束
@@ -801,6 +881,7 @@ export default {
       // 更新 MediaSession 播放状态
       if ('mediaSession' in navigator) {
         navigator.mediaSession.playbackState = 'playing'
+        this.updatePositionState()
       }
     },
     
@@ -810,6 +891,7 @@ export default {
       // 更新 MediaSession 播放状态
       if ('mediaSession' in navigator) {
         navigator.mediaSession.playbackState = 'paused'
+        this.updatePositionState()
       }
     },
     
@@ -860,11 +942,25 @@ export default {
     
     // 显示播放模式菜单
     showPlayModeMenu(event) {
-      this.playModeMenuPosition = {
-        x: event.clientX,
-        y: event.clientY
-      }
-      this.playModeMenuVisible = true
+      // 先关闭所有其他菜单
+      contextMenuManager.closeActiveMenu()
+      
+      // 然后关闭自己的旧菜单，防止瞬移
+      this.playModeMenuVisible = false
+      
+      // 使用 nextTick 确保旧菜单完全关闭后再打开新菜单
+      this.$nextTick(() => {
+        this.playModeMenuPosition = {
+          x: event.clientX,
+          y: event.clientY
+        }
+        this.playModeMenuVisible = true
+        
+        // 注册到全局管理器
+        contextMenuManager.registerMenu(() => {
+          this.playModeMenuVisible = false
+        })
+      })
     },
 
     // 循环切换播放模式
@@ -1068,13 +1164,21 @@ export default {
             console.warn('⚠️ 未找到封面图片，使用默认占位图')
           }
           
+          // 替换封面URL中的 {size} 占位符（酷狗API返回的URL格式）
+          // 使用更高分辨率（1000）以获得更清晰的封面显示
+          if (coverUrl.includes('{size}')) {
+            coverUrl = coverUrl.replace('{size}', '1000')
+            console.log('🔧 替换封面URL占位符（高清）:', coverUrl)
+          }
+          
           // 确保 URL 使用 HTTPS（避免混合内容问题）
           if (coverUrl.startsWith('http://')) {
             coverUrl = coverUrl.replace('http://', 'https://')
-            console.log('🔒 将封面 URL 转换为 HTTPS:', coverUrl)
+            console.log('将封面 URL 转换为 HTTPS:', coverUrl)
           }
           
           // 设置媒体元数据
+          // Windows SMTC 
           navigator.mediaSession.metadata = new MediaMetadata({
             title: songTitle,
             artist: artistName,
@@ -1082,28 +1186,18 @@ export default {
             artwork: [
               {
                 src: coverUrl,
-                sizes: '96x96',
-                type: 'image/jpeg'
-              },
-              {
-                src: coverUrl,
-                sizes: '128x128',
-                type: 'image/jpeg'
-              },
-              {
-                src: coverUrl,
-                sizes: '256x256',
-                type: 'image/jpeg'
-              },
-              {
-                src: coverUrl,
                 sizes: '512x512',
+                type: 'image/jpeg'
+              },
+              {
+                src: coverUrl,
+                sizes: '1000x1000',
                 type: 'image/jpeg'
               }
             ]
           })
           
-          console.log('✅ MediaSession 元数据已更新:', {
+          console.log('元数据已更新:', {
             title: songTitle,
             artist: artistName,
             album: song.album_name || '',
@@ -1116,6 +1210,43 @@ export default {
         }
       } else {
         console.warn('⚠️ 浏览器不支持 MediaSession API')
+      }
+    },
+    
+    // 音频时间更新事件
+    handleTimeUpdate() {
+      const audioEl = this.$refs.audioPlayer
+      if (audioEl && !isNaN(audioEl.currentTime)) {
+        this.currentTime = audioEl.currentTime
+        this.duration = audioEl.duration || 0
+        
+        // 定期更新 MediaSession 位置状态（每秒更新一次，避免过于频繁）
+        if ('mediaSession' in navigator && this.isPlaying) {
+          const now = Math.floor(audioEl.currentTime)
+          if (!this.lastPositionUpdate || now !== this.lastPositionUpdate) {
+            this.lastPositionUpdate = now
+            this.updatePositionState()
+          }
+        }
+      }
+    },
+    
+    // 更新 MediaSession 位置状态
+    updatePositionState() {
+      if ('mediaSession' in navigator && 'setPositionState' in navigator.mediaSession) {
+        try {
+          const audioEl = this.$refs.audioPlayer
+          if (audioEl && !isNaN(audioEl.duration) && audioEl.duration > 0) {
+            navigator.mediaSession.setPositionState({
+              duration: audioEl.duration,
+              playbackRate: audioEl.playbackRate || 1.0,
+              position: audioEl.currentTime || 0
+            })
+          }
+        } catch (error) {
+          // 某些浏览器可能不支持 setPositionState
+          console.debug('设置 MediaSession 位置状态失败:', error)
+        }
       }
     },
     
@@ -1134,11 +1265,11 @@ export default {
           
           // 上一曲/下一曲
           navigator.mediaSession.setActionHandler('previoustrack', () => {
-            this.previous()
+            this.playPrevious()
           })
           
           navigator.mediaSession.setActionHandler('nexttrack', () => {
-            this.next()
+            this.playNext()
           })
           
           // 快进/快退 (可选)
@@ -1371,6 +1502,12 @@ export default {
 .control-btn:hover {
   background: var(--color-background);
   color: var(--color-primary);
+}
+
+.control-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .play-btn {

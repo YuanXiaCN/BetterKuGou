@@ -2,8 +2,9 @@
   <teleport to="body">
     <div 
       v-if="visible" 
+      ref="menu"
       class="context-menu"
-      :style="{ left: position.x + 'px', top: position.y + 'px' }"
+      :style="menuStyle"
       @click.stop
       @contextmenu.prevent
     >
@@ -42,15 +43,45 @@ export default {
       default: () => []
     }
   },
+  data() {
+    return {
+      adjustedPosition: { x: 0, y: 0 }
+    }
+  },
+  computed: {
+    menuStyle() {
+      return {
+        left: this.adjustedPosition.x + 'px',
+        top: this.adjustedPosition.y + 'px'
+      }
+    }
+  },
+  watch: {
+    visible(newVal) {
+      if (newVal) {
+        this.$nextTick(() => {
+          this.adjustMenuPosition()
+        })
+      }
+    },
+    position: {
+      handler() {
+        if (this.visible) {
+          this.$nextTick(() => {
+            this.adjustMenuPosition()
+          })
+        }
+      },
+      deep: true
+    }
+  },
   mounted() {
     document.addEventListener('click', this.handleClickOutside)
-    document.addEventListener('contextmenu', this.handleClickOutside)
     window.addEventListener('resize', this.handleClickOutside)
     window.addEventListener('scroll', this.handleClickOutside, true)
   },
   beforeUnmount() {
     document.removeEventListener('click', this.handleClickOutside)
-    document.removeEventListener('contextmenu', this.handleClickOutside)
     window.removeEventListener('resize', this.handleClickOutside)
     window.removeEventListener('scroll', this.handleClickOutside, true)
   },
@@ -61,8 +92,51 @@ export default {
         this.$emit('close')
       }
     },
-    handleClickOutside() {
+    handleClickOutside(event) {
+      // 如果点击的是菜单内部，不关闭
+      if (this.$el && this.$el.contains(event.target)) {
+        return
+      }
       this.$emit('close')
+    },
+    adjustMenuPosition() {
+      if (!this.$refs.menu) {
+        this.adjustedPosition = { ...this.position }
+        return
+      }
+
+      const menu = this.$refs.menu
+      const menuRect = menu.getBoundingClientRect()
+      const menuWidth = menuRect.width || 180 // 默认宽度
+      const menuHeight = menuRect.height || 200 // 默认高度
+      
+      const viewportWidth = window.innerWidth
+      const viewportHeight = window.innerHeight
+      
+      let x = this.position.x
+      let y = this.position.y
+      
+      // 检查右边界
+      if (x + menuWidth > viewportWidth) {
+        x = viewportWidth - menuWidth - 10 // 留10px边距
+      }
+      
+      // 检查左边界
+      if (x < 0) {
+        x = 10
+      }
+      
+      // 检查下边界
+      if (y + menuHeight > viewportHeight) {
+        y = viewportHeight - menuHeight - 10 // 留10px边距
+      }
+      
+      // 检查上边界
+      if (y < 0) {
+        y = 10
+      }
+      
+      this.adjustedPosition = { x, y }
     }
   }
 }

@@ -27,7 +27,7 @@
             class="playlist-item"
             :class="{ 'active': currentSong && currentSong.hash === song.hash }"
             @dblclick="playSong(song)"
-            @contextmenu.prevent="showContextMenu($event, song, index)"
+            @contextmenu.prevent.stop="showContextMenu($event, song, index)"
           >
           <!-- 播放状态指示器 -->
           <div class="play-indicator">
@@ -101,6 +101,7 @@
 <script>
 import { TransitionGroup } from 'vue'
 import ContextMenu from './ContextMenu.vue'
+import contextMenuManager from '../utils/contextMenuManager.js'
 
 export default {
   name: 'PlaylistDrawer',
@@ -227,13 +228,27 @@ export default {
     
     // 显示右键菜单
     showContextMenu(event, song, index) {
-      this.currentContextSong = song
-      this.currentContextIndex = index
-      this.contextMenuPosition = {
-        x: event.clientX,
-        y: event.clientY
-      }
-      this.contextMenuVisible = true
+      // 先关闭所有其他菜单
+      contextMenuManager.closeActiveMenu()
+      
+      // 然后关闭自己的旧菜单，防止瞬移
+      this.contextMenuVisible = false
+      
+      // 使用 nextTick 确保旧菜单完全关闭后再打开新菜单
+      this.$nextTick(() => {
+        this.currentContextSong = song
+        this.currentContextIndex = index
+        this.contextMenuPosition = {
+          x: event.clientX,
+          y: event.clientY
+        }
+        this.contextMenuVisible = true
+        
+        // 注册到全局管理器
+        contextMenuManager.registerMenu(() => {
+          this.contextMenuVisible = false
+        })
+      })
     },
     
     // 滚动到当前播放的歌曲
