@@ -83,7 +83,7 @@
 
 <script>
 import { getEverydayRecommend } from '../api/music.js'
-import { useSettingsStore } from '../stores/settings.js'
+import { useSettingsStore } from '../stores/settingsStore.js'
 
 export default {
   name: 'DailyRecommendView',
