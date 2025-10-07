@@ -57,7 +57,7 @@
 
 <script>
 import { getPersonalFM } from '../api/music.js'
-import { useSettingsStore } from '../stores/settings.js'
+import { useSettingsStore } from '../stores/settingsStore.js'
 
 export default {
   name: 'PersonalFMView',
