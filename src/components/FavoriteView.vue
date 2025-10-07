@@ -15,7 +15,7 @@
 
     <!-- 加载状态 -->
     <div v-if="loading" class="loading-container">
-      <div class="loading-spinner"></div>
+      <img src="../icon/loding.gif" alt="加载中" class="loading-gif" />
       <p>加载中...</p>
     </div>
 
@@ -34,7 +34,12 @@
     <!-- 歌曲列表 -->
     <div v-else class="song-list">
       <div class="list-header">
-        <div class="col-index">#</div>
+        <div class="col-index" @click="toggleSortOrder">
+          <span>#</span>
+          <span class="sort-arrow" v-if="sortOrder === 'asc'">↑</span>
+          <span class="sort-arrow" v-else-if="sortOrder === 'desc'">↓</span>
+          <span class="sort-arrow" v-else>↕</span>
+        </div>
         <div class="col-title">歌曲</div>
         <div class="col-artist">歌手</div>
         <div class="col-album">专辑</div>
@@ -42,10 +47,10 @@
       </div>
 
       <div 
-        v-for="(song, index) in favoriteList" 
+        v-for="(song, index) in sortedFavoriteList" 
         :key="song.hash"
         class="song-item"
-        :class="{ playing: currentSong && currentSong.hash === song.hash }"
+        :class="{ playing: currentPlayingHash && currentPlayingHash === song.hash }"
         @dblclick="playSong(song)"
         @contextmenu.prevent.stop="showContextMenu($event, song)"
       >
@@ -68,8 +73,8 @@
         <div class="col-duration">
           {{ formatDuration(song.timelen) }}
           <div class="action-buttons">
-            <button class="icon-btn play-btn-inline" @click.stop="playSong(song)" :title="currentSong && currentSong.hash === song.hash ? '暂停' : '播放'">
-              <svg v-if="currentSong && currentSong.hash === song.hash" viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
+            <button class="icon-btn play-btn-inline" @click.stop="playSong(song)" :title="currentPlayingHash === song.hash ? '暂停' : '播放'">
+              <svg v-if="currentPlayingHash === song.hash" viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
                 <path d="M304 176h80v672h-80zm336 0h80v672h-80z"/>
               </svg>
               <svg v-else viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
@@ -113,6 +118,12 @@ export default {
       default: null
     }
   },
+  computed: {
+    // 安全地获取当前播放歌曲的 hash
+    currentPlayingHash() {
+      return this.currentSong?.hash || null
+    }
+  },
   setup() {
     const { settings } = useSettingsStore()
     return { settings }
@@ -124,10 +135,32 @@ export default {
       favoritePlaylistId: null, // 收藏歌单的 ID
       contextMenuVisible: false,
       contextMenuPosition: { x: 0, y: 0 },
-      currentContextSong: null
+      currentContextSong: null,
+      sortOrder: 'none' // 排序状态: 'none', 'asc', 'desc'
     }
   },
   computed: {
+    // 安全地获取当前播放歌曲的 hash
+    currentPlayingHash() {
+      return this.currentSong?.hash || null
+    },
+    // 计算排序后的歌曲列表
+    sortedFavoriteList() {
+      if (this.sortOrder === 'none') {
+        return this.favoriteList
+      }
+      
+      // 创建副本以避免修改原始数组
+      const sortedList = [...this.favoriteList]
+      
+      if (this.sortOrder === 'asc') {
+        // 升序排列
+        return sortedList.sort((a, b) => a.index - b.index)
+      } else {
+        // 降序排列
+        return sortedList.sort((a, b) => b.index - a.index)
+      }
+    },
     contextMenuItems() {
       if (!this.currentContextSong) return []
       
@@ -176,6 +209,16 @@ export default {
   },
   mounted() {
     this.loadFavorites()
+    
+    // 调试：监听 currentSong 变化
+    this.$watch('currentSong', (newVal, oldVal) => {
+      console.log('🎵 [FavoriteView] currentSong 变化:', {
+        old: oldVal?.hash,
+        new: newVal?.hash,
+        oldName: oldVal?.name,
+        newName: newVal?.name
+      })
+    }, { deep: true })
   },
   methods: {
     // 加载收藏列表
@@ -237,7 +280,11 @@ export default {
                 }
               }
               
-              this.favoriteList = allSongs
+              // 为每首歌曲添加index属性
+              this.favoriteList = allSongs.map((song, index) => ({
+                ...song,
+                index: index + 1
+              }))
               console.log(`最终加载完成：${this.favoriteList.length} / ${totalCount} 首歌曲`)
               
               if (this.favoriteList.length > 0) {
@@ -318,7 +365,10 @@ export default {
     
     // 播放歌曲
     playSong(song) {
-      console.log('播放歌曲:', song)
+      console.log('[FavoriteView] playSong 调用:', song.name)
+      console.log('[FavoriteView] 当前 currentSong:', this.currentSong?.name)
+      console.log('[FavoriteView] 当前 currentPlayingHash:', this.currentPlayingHash)
+      console.log('[FavoriteView] 歌曲 hash:', song.hash)
       console.log('设置 - enqueueFullPlaylist:', this.settings?.playback?.enqueueFullPlaylist)
       
       // 检查是否开启了"自动将全部歌单歌曲加入播放列表"功能
@@ -452,6 +502,17 @@ export default {
     // 去发现页面
     goToDiscover() {
       this.$emit('navigate', 'home')
+    },
+    
+    // 切换排序顺序
+    toggleSortOrder() {
+      if (this.sortOrder === 'none') {
+        this.sortOrder = 'asc'
+      } else if (this.sortOrder === 'asc') {
+        this.sortOrder = 'desc'
+      } else {
+        this.sortOrder = 'none'
+      }
     }
   }
 }
@@ -531,18 +592,10 @@ export default {
   color: var(--color-text-secondary);
 }
 
-.loading-spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid var(--color-border);
-  border-top-color: var(--color-primary);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+.loading-gif {
+  width: 60px;
+  height: 60px;
   margin-bottom: var(--spacing-md);
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
 }
 
 /* 空状态 */
@@ -604,7 +657,7 @@ export default {
 }
 
 .song-item.playing {
-  background: rgba(99, 102, 241, 0.1);
+  background: var(--bg-focus);
 }
 
 .song-item.playing .song-name {
@@ -615,8 +668,21 @@ export default {
 .col-index {
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
+  gap: var(--spacing-xs);
   justify-content: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.list-header .col-index:hover {
+  color: var(--color-text);
+}
+
+.sort-arrow {
+  font-size: 12px;
+  color: var(--color-primary);
+  transition: color var(--transition-fast);
+  flex-shrink: 0;
 }
 
 .index-number {
@@ -664,7 +730,7 @@ export default {
 
 .quality-badge {
   padding: 1px 4px;
-  background: rgba(99, 102, 241, 0.2);
+  background: var(--bg-focus-medium);
   color: var(--color-primary);
   font-size: 10px;
   border-radius: 2px;
@@ -728,7 +794,7 @@ export default {
 }
 
 .icon-btn.danger:hover {
-  color: #ff4d4f;
+  color: var(--color-error);
 }
 
 .play-btn-inline {
@@ -741,10 +807,10 @@ export default {
 }
 
 .favorite-btn.active {
-  color: #ff4d4f;
+  color: var(--color-error);
 }
 
 .favorite-btn.active:hover {
-  color: #ff7875;
+  color: var(--color-error-hover);
 }
 </style>

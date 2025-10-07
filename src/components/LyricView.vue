@@ -36,7 +36,7 @@
 
         <!-- 频谱进度条 -->
         <div class="spectrum-progress-wrapper">
-          <div class="spectrum-progress" ref="spectrumProgress">
+          <div class="spectrum-progress" ref="spectrumProgress" @click="handleProgressClick">
             <!-- 频谱条 -->
             <div class="spectrum-bars">
               <div v-for="i in 50" :key="i" class="spectrum-bar" :style="{ height: getBarHeight(i) }"></div>
@@ -44,7 +44,11 @@
             <!-- 进度条 -->
             <div class="progress-track">
               <div class="progress-fill" :style="{ width: progressPercentage + '%' }"></div>
-              <div class="progress-thumb" :style="{ left: progressPercentage + '%' }"></div>
+              <div 
+                class="progress-thumb" 
+                :style="{ left: progressPercentage + '%' }"
+                @mousedown="handleThumbMouseDown"
+              ></div>
             </div>
           </div>
           <!-- 时间显示 -->
@@ -278,7 +282,7 @@ export default {
           endLyricIndex: 0
         })
         if (process.env.NODE_ENV === 'development') {
-          console.log('🌉 检测到开头桥段:', bridges[bridges.length - 1])
+          console.log('检测到开头桥段:', bridges[bridges.length - 1])
         }
       }
       
@@ -303,7 +307,7 @@ export default {
             currentLineEndTime = currentLine.time + lastWord.endTime
             
             if (process.env.NODE_ENV === 'development') {
-              console.log(`📝 使用KRC精确时间 [行${i}]:`, {
+              console.log(`使用KRC精确时间 [行${i}]:`, {
                 lineStart: currentLine.time.toFixed(2) + 's',
                 lastWordEndTime: lastWord.endTime.toFixed(2) + 's',
                 lineEndTime: currentLineEndTime.toFixed(2) + 's',
@@ -326,7 +330,7 @@ export default {
               endLyricIndex: i + 1
             })
             if (process.env.NODE_ENV === 'development') {
-              console.log(`🌉 检测到桥段 [${i} -> ${i+1}]:`, {
+              console.log(`检测到桥段 [${i} -> ${i+1}]:`, {
                 currentLineTime: currentLine.time.toFixed(2) + 's',
                 currentLineEndTime: currentLineEndTime.toFixed(2) + 's',
                 nextLineTime: nextLine.time.toFixed(2) + 's',
@@ -344,7 +348,7 @@ export default {
       // 注意：结尾不视为桥段
       
       if (process.env.NODE_ENV === 'development' && bridges.length > 0) {
-        console.log('🌉 总共检测到', bridges.length, '个桥段')
+        console.debug('总共检测到', bridges.length, '个桥段')
       }
       return bridges
     },
@@ -407,7 +411,7 @@ export default {
           this.frameCount++
           const now = performance.now()
           if (now - this.lastUpdateTime >= 1000) {
-            console.log(`🎵 歌词更新帧率: ${this.frameCount} FPS`)
+            console.debug(`歌词更新帧率: ${this.frameCount} FPS`)
             this.lastUpdateTime = now
             this.frameCount = 0
           }
@@ -444,7 +448,7 @@ export default {
       )
       
       if (process.env.NODE_ENV === 'development' && currentBridge && !wasActive) {
-        console.log('🔍 检查桥段条件:', {
+        console.log('检查桥段条件:', {
           currentTime: currentTime.toFixed(2) + 's',
           currentLyricIndex: this.currentLyricIndex,
           bridgeStartLyricIndex: currentBridge.startLyricIndex,
@@ -462,7 +466,7 @@ export default {
         if (shouldShow) {
           // 桥段条应该显示
           if (!wasActive && process.env.NODE_ENV === 'development') {
-            console.log(`🌉 进入桥段 [${currentBridge.startLyricIndex} -> ${currentBridge.endLyricIndex}]`, {
+            console.log(`进入桥段 [${currentBridge.startLyricIndex} -> ${currentBridge.endLyricIndex}]`, {
               currentTime: currentTime.toFixed(2) + 's',
               currentLyricIndex: this.currentLyricIndex,
               startTime: currentBridge.startTime.toFixed(2) + 's',
@@ -480,7 +484,7 @@ export default {
           
           if (process.env.NODE_ENV === 'development' && Math.random() < 0.01) {
             // 1% 概率输出进度信息，避免刷屏
-            console.log('🎨 桥段进度条状态:', {
+            console.log('桥段进度条状态:', {
               progress: this.bridgeProgress.toFixed(2) + '%',
               scaleX: Math.max(0.05, (100 - this.bridgeProgress) / 100).toFixed(3),
               color: this.getBridgeProgressColor(),
@@ -512,7 +516,7 @@ export default {
         } else {
           // 不满足显示条件
           if (wasActive && process.env.NODE_ENV === 'development') {
-            console.log('🌉 桥段条件不满足，隐藏')
+            console.log('桥段条件不满足，隐藏')
           }
           this.isBridgeActive = false
           this.bridgeInfo = null
@@ -520,7 +524,7 @@ export default {
         }
       } else {
         if (wasActive && process.env.NODE_ENV === 'development') {
-          console.log('🌉 桥段结束')
+          console.log('桥段结束')
         }
         this.isBridgeActive = false
         this.bridgeInfo = null
@@ -719,12 +723,12 @@ export default {
 
     // 解析歌词
     parseLyrics(lrcContent) {
-      console.log('🎵 解析歌词，内容长度:', lrcContent?.length)
-      console.log('🎵 歌词内容预览:', lrcContent?.substring(0, 200))
+      console.log('解析歌词，内容长度:', lrcContent?.length)
+      console.log('歌词内容预览:', lrcContent?.substring(0, 200))
       
       if (!lrcContent) {
         this.parsedLyrics = [{ time: 0, text: '暂无歌词' }]
-        console.log('⚠️ 歌词内容为空')
+        console.log('歌词内容为空')
         return
       }
 
@@ -732,17 +736,17 @@ export default {
       let cleanContent = lrcContent.replace(/^\ufeff/, '') // 移除BOM
       cleanContent = cleanContent.trim()
       
-      console.log('🧹 清理后内容预览:', cleanContent?.substring(0, 200))
+      console.log('清理后内容预览:', cleanContent?.substring(0, 200))
 
       // 处理不同的换行符（\r\n, \n, \r）
       const lines = cleanContent.split(/\r\n|\n|\r/).filter(line => line.trim())
       const result = []
       
-      console.log('🎵 歌词总行数:', lines.length)
-      console.log('🎵 前5行原始内容:', lines.slice(0, 5))
+      console.log('歌词总行数:', lines.length)
+      console.log('前5行原始内容:', lines.slice(0, 5))
       
       for (let line of lines) {
-        console.log('🔍 处理行:', line)
+        console.log('处理行:', line)
         
         // KRC格式：[时间,持续时间]<字符时间信息>歌词内容
         const krcMatch = line.match(/^\[(\d+),(\d+)\](.*)$/)
@@ -751,16 +755,16 @@ export default {
           const duration = parseInt(krcMatch[2]) / 1000   // 毫秒转秒
           const text = krcMatch[3].trim()
           
-          console.log('✅ KRC行匹配:', { startTime, duration, text: text.substring(0, 50) })
+          console.log('KRC行匹配:', { startTime, duration, text: text.substring(0, 50) })
           
           if (text) {
             // 解析KRC格式的逐字时间信息
             const words = this.parseKrcWords(text)
             const lineText = words.map(w => w.word).join('')
             
-            console.log('📝 KRC 解析结果 - words数量:', words.length)
-            console.log('📝 KRC 解析结果 - lineText:', lineText)
-            console.log('📝 KRC 解析结果 - 是否有空格:', lineText.includes(' '))
+            console.log('KRC 解析结果 - words数量:', words.length)
+            console.log('KRC 解析结果 - lineText:', lineText)
+            console.log('KRC 解析结果 - 是否有空格:', lineText.includes(' '))
             
             if (lineText.trim()) {
               result.push({ 
@@ -768,7 +772,7 @@ export default {
                 text: lineText, 
                 words: words // 保存逐字信息
               })
-              console.log('✅ 添加KRC歌词行:', lineText)
+              console.log('添加KRC歌词行:', lineText)
             }
           }
         } else {
@@ -781,16 +785,16 @@ export default {
             const time = minutes * 60 + seconds + milliseconds / 1000
             const text = lrcMatch[4].trim()
             
-            console.log('✅ LRC行匹配:', { time, text })
+            console.log('LRC行匹配:', { time, text })
             
             if (text) {
               result.push({ time, text })
-              console.log('✅ 添加LRC歌词行:', text)
+              console.log('添加LRC歌词行:', text)
             }
           } else {
             // 跳过元信息行（如[ar:], [ti:]等）
             if (!line.match(/^\[[a-z]+:/)) {
-              console.log('⚠️ 无法匹配的行:', line)
+              console.log('无法匹配的行:', line)
             }
           }
         }
@@ -805,19 +809,19 @@ export default {
       console.log('🔍 歌词是否包含空格:', hasSpaces)
       if (hasSpaces) {
         const linesWithSpaces = result.filter(line => line.text.includes(' '))
-        console.log('📝 包含空格的行数:', linesWithSpaces.length)
-        console.log('📝 第一行带空格的歌词:', linesWithSpaces[0]?.text)
-        console.log('📝 空格数量:', (linesWithSpaces[0]?.text.match(/ /g) || []).length)
+        console.log('包含空格的行数:', linesWithSpaces.length)
+        console.log('第一行带空格的歌词:', linesWithSpaces[0]?.text)
+        console.log('空格数量:', (linesWithSpaces[0]?.text.match(/ /g) || []).length)
       }
       
-      console.log('✅ 歌词解析完成，共', this.parsedLyrics.length, '行')
-      console.log('📋 前3行歌词:', this.parsedLyrics.slice(0, 3))
+      console.log('歌词解析完成，共', this.parsedLyrics.length, '行')
+      console.log('前3行歌词:', this.parsedLyrics.slice(0, 3))
     },
 
     // 解析KRC格式的逐字时间信息
     parseKrcWords(text) {
       const words = []
-      console.log('🔍 解析逐字信息:', text)
+      console.log('解析逐字信息:', text)
       
       // KRC格式：<startTime,duration>word<startTime,duration>word...
       // 注意：时间是相对于行开始的毫秒数
@@ -829,7 +833,7 @@ export default {
         const duration = parseInt(match[2]) / 1000  // 毫秒转秒
         const word = match[4] // 注意这里是match[4]，因为有3个数字参数
         
-        console.log('🎯 找到字符:', { word, startTime, duration })
+        console.log('找到字符:', { word, startTime, duration })
         
         if (word) {
           words.push({
@@ -848,7 +852,7 @@ export default {
           const duration = parseInt(match[2]) / 1000  // 毫秒转秒
           const word = match[3]
           
-          console.log('🎯 找到字符(2参数):', { word, startTime, duration })
+          console.log('找到字符(2参数):', { word, startTime, duration })
           
           if (word) {
             words.push({
@@ -875,11 +879,11 @@ export default {
               endTime: (index + 1) * charDuration
             })
           })
-          console.log('📝 使用平分时间，字符数:', chars.length)
+          console.log('使用平分时间，字符数:', chars.length)
         }
       }
       
-      console.log('✅ 解析完成，共', words.length, '个字符')
+      console.log('解析完成，共', words.length, '个字符')
       return words
     },
 
@@ -1205,7 +1209,7 @@ export default {
       this.$nextTick(() => {
         const currentElement = this.lyricLineRefs[this.currentLyricIndex]
         if (!currentElement) {
-          console.log('⚠️ 当前歌词元素不存在')
+          console.log('当前歌词元素不存在')
           return
         }
 
@@ -1226,7 +1230,7 @@ export default {
         const containerWidth = lyricsSection?.clientWidth || container?.clientWidth || window.innerWidth * 0.5
         const lyricWidth = currentElement.scrollWidth
         
-        console.log('📏 宽度检测:', { 
+        console.log('宽度检测:', { 
           lyricWidth, 
           containerWidth,
           lyricsSectionWidth: lyricsSection?.clientWidth,
@@ -1253,7 +1257,7 @@ export default {
           currentElement.style.animationDuration = `${duration}s`
           currentElement.style.setProperty('--scroll-distance', `${scrollDistance}px`)
           
-          console.log('🎵 启用长歌词滚动:', { 
+          console.log('启用长歌词滚动:', { 
             scrollDistance, 
             duration,
             willScroll: true
@@ -1264,7 +1268,7 @@ export default {
           currentElement.style.animationDuration = ''
           currentElement.style.setProperty('--scroll-distance', '0px')
           
-          console.log('✅ 歌词长度正常，无需滚动')
+          console.log('歌词长度正常，无需滚动')
         }
       })
     },
@@ -1354,6 +1358,43 @@ export default {
 
     toggleFavorite() {
       this.$emit('toggle-favorite')
+    },
+
+    // 处理进度条点击事件
+    handleProgressClick(event) {
+      const progressBar = event.currentTarget
+      const rect = progressBar.getBoundingClientRect()
+      const pos = (event.clientX - rect.left) / rect.width
+      const time = pos * this.duration
+      this.seekTo(time)
+    },
+
+    // 处理拖动点按下事件
+    handleThumbMouseDown(event) {
+      event.preventDefault()
+      event.stopPropagation()
+      const progressBar = this.$refs.spectrumProgress
+      const rect = progressBar.getBoundingClientRect()
+      
+      const onMouseMove = (moveEvent) => {
+        const pos = (moveEvent.clientX - rect.left) / rect.width
+        const time = Math.max(0, Math.min(1, pos)) * this.duration
+        this.seekTo(time)
+      }
+
+      const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove)
+        document.removeEventListener('mouseup', onMouseUp)
+      }
+
+      document.addEventListener('mousemove', onMouseMove)
+      document.addEventListener('mouseup', onMouseUp)
+    },
+
+    // 跳转到指定时间
+    seekTo(time) {
+      // 发送事件到父组件，让播放器跳转到指定时间
+      this.$emit('seek', time)
     }
   }
 }
@@ -1486,12 +1527,14 @@ export default {
 .spectrum-progress-wrapper {
   width: 100%;
   max-width: 400px;
+  user-select: none;
 }
 
 .spectrum-progress {
   position: relative;
   height: 60px;
   margin-bottom: 12px;
+  cursor: pointer;
 }
 
 .spectrum-bars {
@@ -1500,11 +1543,12 @@ export default {
   justify-content: space-between;
   height: 40px;
   margin-bottom: 8px;
+  pointer-events: none;
 }
 
 .spectrum-bar {
   width: 3px;
-  background: linear-gradient(to top, #ff6b6b, #feca57, #48dbfb);
+  background: linear-gradient(to top, var(--color-primary), var(--color-secondary, #feca57), var(--color-accent, #48dbfb));
   border-radius: 2px;
   transition: height 0.1s ease;
   min-height: 2px;
@@ -1520,7 +1564,7 @@ export default {
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #ff6b6b, #feca57);
+  background: linear-gradient(90deg, var(--color-primary), var(--color-secondary, #feca57));
   border-radius: 3px;
   transition: width 0.1s ease;
 }
@@ -1535,6 +1579,17 @@ export default {
   border-radius: 50%;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   transition: left 0.1s ease;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.spectrum-progress:hover .progress-thumb {
+  opacity: 1;
+}
+
+.progress-thumb:hover {
+  transform: translate(-50%, -50%) scale(1.2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .time-display {

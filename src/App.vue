@@ -7,6 +7,9 @@ import HomeView from './components/HomeView.vue'
 import FavoriteView from './components/FavoriteView.vue'
 import SettingsView from './components/SettingsView.vue'
 import MusicPlayer from './components/MusicPlayer.vue'
+import PersonalFMView from './components/PersonalFMView.vue'
+import DailyRecommendView from './components/DailyRecommendView.vue'
+import RankDetailView from './components/RankDetailView.vue'
 import { getLoginInfo, isLoggedIn } from './api/auth.js'
 import { getUserPlaylists } from './api/music.js'
 import { useSettingsStore } from './stores/settingsStore.js'
@@ -26,6 +29,9 @@ const userInfo = ref(null)
 
 // 当前视图
 const currentView = ref('home')
+
+// 排行榜数据（用于传递给RankDetailView）
+const rankData = ref(null)
 
 // 用户歌单列表（TODO: 从API获取）
 const userPlaylists = ref([
@@ -140,7 +146,10 @@ const handleLogout = () => {
 const handleNavigate = (view, data) => {
   console.log('Navigate to:', view, data)
   currentView.value = view
-  // TODO: 根据不同的视图加载不同的内容
+  // 如果是排行榜详情，保存排行榜数据
+  if (view === 'rank' && data) {
+    rankData.value = data
+  }
 }
 
 // 处理创建歌单
@@ -151,10 +160,12 @@ const handleCreatePlaylist = () => {
 
 // 处理播放歌曲
 const handlePlay = (song) => {
-  console.log('App.vue - Play song:', song)
+  console.log('🎵 [App.vue] handlePlay 调用:', song.name || song.filename)
+  console.log('🎵 [App.vue] 歌曲 hash:', song.hash)
+  console.log('🎵 [App.vue] 旧 currentSong:', currentSong.value?.name)
   console.log('App.vue - userLoggedIn:', userLoggedIn.value)
   currentSong.value = song
-  console.log('App.vue - currentSong after set:', currentSong.value)
+  console.log('🎵 [App.vue] 新 currentSong:', currentSong.value?.name)
   // 如果是单曲播放，只有当前歌曲
   if (!playlist.value.find(s => s.hash === song.hash)) {
     playlist.value = [song]
@@ -258,7 +269,8 @@ const handleNext = () => {
 
 // 处理歌曲切换事件
 const handleSongChanged = (song) => {
-  console.log('歌曲已切换:', song)
+  console.log('🎵 [App.vue] handleSongChanged - 歌曲已切换:', song.name || song.filename)
+  console.log('🎵 [App.vue] 歌曲 hash:', song.hash)
   currentSong.value = song
   // 同时更新播放列表索引
   const index = playlist.value.findIndex(s => s.hash === song.hash)
@@ -738,6 +750,16 @@ watch(playlistIndex, () => {
   queueSessionPersist({ immediate: true })
 })
 
+// 添加调试：监控 currentSong 变化
+watch(currentSong, (newVal, oldVal) => {
+  console.log('🎵 [App.vue] currentSong 响应式变化:', {
+    old: oldVal?.hash,
+    new: newVal?.hash,
+    oldName: oldVal?.name,
+    newName: newVal?.name
+  })
+}, { deep: true })
+
 watch(
   () => musicPlayerRef.value?.isPlaying,
   () => {
@@ -818,15 +840,15 @@ function performMemoryCleanup() {
     
     // 4. 清理大型数组和对象缓存
     // 保留最近的播放历史，清理较旧的
-    if (playlist.value.length > 100) {
-      console.log(`清理播放列表，保留最近100首歌曲 (原有 ${playlist.value.length} 首)`)
-      // 保留当前播放的歌曲和前后的歌曲
-      const currentIndex = playlistIndex.value
-      const start = Math.max(0, currentIndex - 50)
-      const end = Math.min(playlist.value.length, currentIndex + 50)
-      playlist.value = playlist.value.slice(start, end)
-      playlistIndex.value = currentIndex - start
-    }
+    // if (playlist.value.length > 100) {
+    //   console.log(`清理播放列表，保留最近100首歌曲 (原有 ${playlist.value.length} 首)`)
+    //   // 保留当前播放的歌曲和前后的歌曲
+    //   const currentIndex = playlistIndex.value
+    //   const start = Math.max(0, currentIndex - 50)
+    //   const end = Math.min(playlist.value.length, currentIndex + 50)
+    //   playlist.value = playlist.value.slice(start, end)
+    //   playlistIndex.value = currentIndex - start
+    // }
     
     console.log('✅ [渲染进程] 内存清理完成')
   } catch (error) {
@@ -894,6 +916,33 @@ function performMemoryCleanup() {
                 @play-next="handlePlayNext"
                 @remove-from-playlist="handleRemoveFromPlaylist"
                 @search="handleSearch"
+              />
+            </div>
+            
+            <!-- 私人FM视图 -->
+            <div v-else-if="currentView === 'personal-fm'" class="view-personal-fm">
+              <PersonalFMView 
+                @navigate="handleNavigate"
+                @play="handlePlay"
+              />
+            </div>
+            
+            <!-- 每日推荐视图 -->
+            <div v-else-if="currentView === 'daily-recommend'" class="view-daily-recommend">
+              <DailyRecommendView 
+                @navigate="handleNavigate"
+                @play="handlePlay"
+                @play-all="handlePlayAll"
+              />
+            </div>
+            
+            <!-- 排行榜详情视图 -->
+            <div v-else-if="currentView === 'rank' && rankData" class="view-rank-detail">
+              <RankDetailView 
+                :rank-data="rankData"
+                @navigate="handleNavigate"
+                @play="handlePlay"
+                @play-all="handlePlayAll"
               />
             </div>
             
@@ -1069,20 +1118,20 @@ function performMemoryCleanup() {
 
 .primary-btn {
   padding: var(--spacing-md) var(--spacing-xl);
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
+  background: var(--gradient-primary);
+  color: var(--text-white);
   border: none;
   border-radius: var(--radius-md);
   font-size: var(--font-size-base);
   font-weight: 500;
   cursor: pointer;
   transition: all 0.3s ease;
-  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+  box-shadow: var(--shadow-button);
 }
 
 .primary-btn:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+  box-shadow: var(--shadow-button-hover);
 }
 
 .primary-btn:active {
@@ -1136,8 +1185,8 @@ function performMemoryCleanup() {
   display: inline-block;
   margin-top: var(--spacing-md);
   padding: var(--spacing-sm) var(--spacing-md);
-  background: linear-gradient(135deg, #ffd700, #ffed4e);
-  color: #000;
+  background: var(--gradient-gold);
+  color: var(--text-black);
   border-radius: var(--radius-md);
   font-weight: 600;
   font-size: var(--font-size-sm);

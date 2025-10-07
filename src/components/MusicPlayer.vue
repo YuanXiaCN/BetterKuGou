@@ -131,7 +131,9 @@
 
       <!-- 右侧:音量和其他控制 -->
       <div class="player-extras-section">
+        <!-- 默认样式：显示播放模式按钮 -->
         <button 
+          v-if="playerStyle !== 'netease'"
           class="icon-btn" 
           @click="togglePlayMode" 
           @contextmenu.prevent.stop="showPlayModeMenu"
@@ -213,6 +215,7 @@
         @next="playNext"
         @toggle-play-mode="cyclePlayMode"
         @toggle-favorite="toggleFavorite"
+        @seek="handleSeek"
       />
     </Transition>
   </div>
@@ -258,7 +261,7 @@ export default {
     const { settings } = useSettingsStore()
     const playerStyle = computed(() => {
       const style = settings.custom?.playerStyle || 'default'
-      console.log('🎨 当前播放器样式:', style)
+      console.log('当前播放器样式:', style)
       return style
     })
     return {
@@ -289,6 +292,7 @@ export default {
       currentIndex: 0, // 当前播放索引
       showPlaylist: false, // 是否显示播放列表
       playedHistory: [], // 已播放历史（用于随机播放）
+      shuffledPlaylist: [], // 随机播放列表（预先打乱的播放顺序）
       playOrderHistory: [], // 播放顺序历史（用于上一首功能）
       historyPointer: -1, // 播放历史指针，-1表示在最新位置
       isNavigatingHistory: false, // 是否正在历史记录中导航
@@ -346,15 +350,15 @@ export default {
         if (newSong) {
           // 如果新歌曲与当前播放的歌曲相同，不重新加载
           if (this.currentSong && this.currentSong.hash === newSong.hash) {
-            console.log('🔄 歌曲相同，跳过重复加载:', newSong.name || newSong.filename)
+            console.log('歌曲相同，跳过重复加载:', newSong.name || newSong.filename)
             return
           }
-          // ⚠️ 检查是否正在切歌中，避免冲突
+          // 检查是否正在切歌中，避免冲突
           if (this.isSwitchingSong) {
-            console.log('⚠️ 正在切歌中，忽略外部 song prop 变化')
+            console.log('正在切歌中，忽略外部 song prop 变化')
             return
           }
-          console.log('📻 外部传入新歌曲，加载:', newSong.name || newSong.filename)
+          console.log('外部传入新歌曲，加载:', newSong.name || newSong.filename)
           this.currentSong = newSong
           this.loadSong(newSong)
         }
@@ -365,9 +369,17 @@ export default {
     playlist: {
       handler(newPlaylist) {
         console.log('播放列表更新:', newPlaylist.length, '首歌曲')
-        // 播放列表变化时重置历史记录
-        this.playOrderHistory = []
-        this.playedHistory = []
+        // 播放列表变化时不重置历史记录,只确保 currentIndex 在有效范围内
+        if (this.currentIndex >= newPlaylist.length) {
+          this.currentIndex = Math.max(0, newPlaylist.length - 1)
+          console.log('调整 currentIndex 到有效范围:', this.currentIndex)
+        }
+        
+        // 如果在随机播放模式下，重新生成随机播放列表
+        if (this.playMode === 'shuffle' && newPlaylist.length > 0) {
+          this.generateShuffledPlaylist()
+          console.log('播放列表变化，重新生成随机播放列表')
+        }
       },
       deep: true
     },
@@ -384,18 +396,19 @@ export default {
           const lastRecordedIndex = this.playOrderHistory[this.playOrderHistory.length - 1]
           if (lastRecordedIndex !== newIndex) {
             this.playOrderHistory.push(newIndex)
-            // 限制历史记录长度
-            if (this.playOrderHistory.length > 50) {
+            // 限制历史记录长度为200,避免内存占用过多
+            // 注意:这不会影响播放列表本身,只是限制"上一曲"功能的历史深度
+            if (this.playOrderHistory.length > 200) {
               this.playOrderHistory.shift()
             }
-            console.log('🎵 记录播放顺序历史:', newIndex, '历史长度:', this.playOrderHistory.length)
+            console.log('记录播放顺序历史:', newIndex, '历史长度:', this.playOrderHistory.length)
           }
           
           // 重置指针到最新位置
           this.historyPointer = -1
         }
         
-        // ⚠️ 注意：不在这里触发 loadSong，由 playNext/playPrevious 等方法直接调用
+        // 注意：不在这里触发 loadSong，由 playNext/playPrevious 等方法直接调用
         // 只在索引改变后通知父组件（但不触发重复加载）
         if (newIndex !== -1 && this.playlist[newIndex] && !this.isSwitchingSong) {
           this.$emit('song-changed', this.playlist[newIndex])
@@ -446,7 +459,7 @@ export default {
           if (detailResponse && detailResponse.status === 1 && detailResponse.data && detailResponse.data.length > 0) {
             audioDetail = { ...song, ...detailResponse.data[0] }
             console.log('合并后的歌曲信息:', audioDetail)
-            console.log('🎵 歌手信息字段检查:', {
+            console.log('歌手信息字段检查:', {
               'singerinfo': audioDetail.singerinfo,
               'singername': audioDetail.singername,
               'author_name': audioDetail.author_name,
@@ -471,19 +484,19 @@ export default {
           
           // 参考 BetterKugou：response.url 是一个数组，取第一个元素
           if (urlResponse.url && Array.isArray(urlResponse.url) && urlResponse.url.length > 0) {
-            playUrl = urlResponse.url[0]  // ⚠️ 重要：取数组第一个元素
-            console.log('✅ 获取播放URL:', playUrl)
+            playUrl = urlResponse.url[0]  // 重要：取数组第一个元素
+            console.log('获取播放URL:', playUrl)
             
             // 如果是 http，转换为 https（提高安全性）
             if (playUrl && playUrl.startsWith('http://')) {
               playUrl = playUrl.replace('http://', 'https://')
-              console.log('🔒 转换为HTTPS')
+              console.log('转换为HTTPS')
             }
           }
           // 备用：直接字符串格式
           else if (urlResponse.url && typeof urlResponse.url === 'string') {
             playUrl = urlResponse.url
-            console.log('✅ 获取播放URL (字符串):', playUrl)
+            console.log('获取播放URL (字符串):', playUrl)
           }
           
           if (playUrl && typeof playUrl === 'string') {
@@ -491,13 +504,13 @@ export default {
             const audioEl = this.$refs.audioPlayer
             audioEl.src = playUrl
             
-            // ✅ 只在成功获取播放地址后才更新 currentSong
+            // 只在成功获取播放地址后才更新 currentSong
             this.currentSong = song
             
             // 自动播放
             try {
               await audioEl.play()
-              console.log('▶️ 播放成功')
+              console.log('播放成功')
               
               // 设置系统媒体会话信息 (SMTC)
               this.updateMediaSession(audioDetail)
@@ -515,21 +528,21 @@ export default {
                 console.warn('歌词加载失败，但不影响播放:', err.message)
               })
             } catch (playError) {
-              console.error('❌ 播放失败:', playError.message)
+              console.error('播放失败:', playError.message)
               this.showError(`播放失败: ${playError.message}`)
               // 恢复之前的歌曲
               this.currentSong = previousSong
               return false
             }
           } else {
-            console.error('❌ 播放地址无效')
+            console.error('播放地址无效')
             this.showError('播放地址格式错误，跳过该歌曲')
             // 恢复之前的歌曲
             this.currentSong = previousSong
             return false
           }
         } else {
-          console.error('❌ 获取播放地址失败，状态:', urlResponse?.status)
+          console.error('获取播放地址失败，状态:', urlResponse?.status)
           const errorMsg = this.getPlayErrorMessage(urlResponse)
           this.showError(errorMsg)
           // 恢复之前的歌曲
@@ -549,7 +562,7 @@ export default {
     
     // 显示错误提示（非弹窗）
     showError(message) {
-      console.warn('⚠️', message)
+      console.warn('', message)
       // TODO: 可以在这里添加一个非阻塞的提示组件
       // 例如 Toast 提示
     },
@@ -599,41 +612,41 @@ export default {
           // 优先使用解码后的内容
           if (lyricResponse.decodeContent) {
             this.currentLyrics = lyricResponse.decodeContent
-            console.log('✅ 歌词加载成功（已解码），内容长度:', lyricResponse.decodeContent.length)
-            console.log('🔍 设置的歌词内容预览:', this.currentLyrics.substring(0, 200))
+            console.log('歌词加载成功（已解码），内容长度:', lyricResponse.decodeContent.length)
+            console.log('设置的歌词内容预览:', this.currentLyrics.substring(0, 200))
           } else if (lyricResponse.content) {
             // 如果没有解码内容，尝试使用原始content（可能是base64编码）
             try {
               // 尝试base64解码
               const decoded = atob(lyricResponse.content)
               this.currentLyrics = decoded
-              console.log('✅ 歌词base64解码成功，内容长度:', decoded.length)
+              console.log('歌词base64解码成功，内容长度:', decoded.length)
             } catch (e) {
               // 如果解码失败，直接使用原始内容
               this.currentLyrics = lyricResponse.content
-              console.log('✅ 使用原始歌词内容，长度:', lyricResponse.content.length)
+              console.log('使用原始歌词内容，长度:', lyricResponse.content.length)
             }
           } else if (lyricResponse.data && lyricResponse.data.content) {
             // 尝试从data.content获取
             this.currentLyrics = lyricResponse.data.content
-            console.log('✅ 从data.content获取歌词成功')
+            console.log('从data.content获取歌词成功')
           } else {
             // 打印完整响应以便调试
-            console.log('📋 完整歌词API响应:', JSON.stringify(lyricResponse, null, 2))
+            console.log('完整歌词API响应:', JSON.stringify(lyricResponse, null, 2))
             this.setDefaultLyrics(song)
-            console.log('⚠️ 歌词内容为空，使用默认歌词')
+            console.log('歌词内容为空，使用默认歌词')
           }
         } else {
-          console.log('📋 完整响应:', JSON.stringify(lyricResponse, null, 2))
+          console.log('完整响应:', JSON.stringify(lyricResponse, null, 2))
           this.setDefaultLyrics(song)
-          console.log('⚠️ 歌词获取失败，状态:', lyricResponse?.status)
+          console.log('歌词获取失败，状态:', lyricResponse?.status)
         }
       } catch (error) {
-        console.error('❌ 加载歌词失败:', error)
+        console.error('加载歌词失败:', error)
         
         // 根据错误类型提供不同的处理
         if (error.code === 'ERR_BAD_RESPONSE' || error.response?.status === 502) {
-          console.log('🔄 API服务暂时不可用，使用默认歌词')
+          console.log('API服务暂时不可用，使用默认歌词')
           this.setDefaultLyrics(song)
         } else {
           this.currentLyrics = '[00:00.00]歌词服务暂时不可用'
@@ -646,13 +659,13 @@ export default {
       const songName = this.getSongName(song.name || song.songname || song.audio_name)
       const artistName = this.getSingerNames(song.singerinfo || song.singername)
       
-      this.currentLyrics = `[00:00.00]♪ 正在播放: ${songName}
-[00:02.00]♪ 演唱者: ${artistName}
+      this.currentLyrics = `[00:00.00] 正在播放: ${songName}
+[00:02.00] 作曲: ${artistName}
 [00:04.00]
-[00:06.00]🎵 暂时无法获取歌词
-[00:08.00]🎵 请欣赏这美妙的音乐
+[00:06.00] 无法获取歌词
+[00:08.00] 请欣赏
 [00:10.00]
-[00:30.00]♪ 享受音乐带来的美好时光`
+[00:30.00] 享受音乐带来的美好时光`
     },
     
     // 播放/暂停
@@ -678,7 +691,7 @@ export default {
       
       // 防止并发切歌
       if (this.isSwitchingSong) {
-        console.warn('⚠️ 正在切歌中，忽略本次请求')
+        console.warn('正在切歌中，忽略本次请求')
         return
       }
       
@@ -689,7 +702,7 @@ export default {
       
       // 设置切歌锁
       this.isSwitchingSong = true
-      console.log('🔒 开始切歌（上一曲），已加锁')
+      console.log('开始切歌（上一曲），已加锁')
       
       const originalIndex = this.currentIndex
       let attempts = 0
@@ -700,39 +713,27 @@ export default {
       try {
         while (attempts < maxAttempts) {
           if (this.playMode === 'shuffle') {
-            // 随机模式下，从播放历史中获取上一首
-            if (this.playOrderHistory.length > 0) {
-              let targetPointer;
-              
-              if (this.historyPointer === -1) {
-                // 当前在最新位置，回到倒数第二个
-                targetPointer = this.playOrderHistory.length - 2
-              } else {
-                // 当前在历史中间，继续向前
-                targetPointer = this.historyPointer - 1
-              }
-              
-              if (targetPointer >= 0) {
-                this.historyPointer = targetPointer
-                const previousIndex = this.playOrderHistory[targetPointer]
-                this.currentIndex = previousIndex
+            // 使用预先打乱的播放列表
+            if (this.shuffledPlaylist.length > 0) {
+              // 在已打乱的列表中找到当前位置
+              const shuffledIndex = this.shuffledPlaylist.findIndex(song => song.hash === this.currentSong.hash)
+              if (shuffledIndex !== -1) {
+                // 获取上一首歌曲（在打乱列表中的位置）
+                const prevIndex = (shuffledIndex - 1 + this.shuffledPlaylist.length) % this.shuffledPlaylist.length
+                const prevSong = this.shuffledPlaylist[prevIndex]
                 
-                // 从 playedHistory 中移除当前歌曲
-                const currentIndexPos = this.playedHistory.indexOf(originalIndex)
-                if (currentIndexPos !== -1) {
-                  this.playedHistory.splice(currentIndexPos, 1)
-                }
-                
-                console.log('🔀 随机模式回到上一首:', this.playlist[this.currentIndex].name, '索引:', this.currentIndex, '指针位置:', targetPointer)
+                // 在原始播放列表中找到这首歌的索引
+                this.currentIndex = this.playlist.findIndex(song => song.hash === prevSong.hash)
+                console.log('随机模式上一首:', prevSong.name, '原始索引:', this.currentIndex)
               } else {
-                // 已经到历史最前面，按列表循环处理
-                this.currentIndex = (this.currentIndex - 1 + this.playlist.length) % this.playlist.length
-                console.log('� 已到历史最前，循环到上一首:', this.playlist[this.currentIndex].name)
+                // 如果找不到当前歌曲，使用随机选择
+                this.currentIndex = Math.floor(Math.random() * this.playlist.length)
+                console.log('当前歌曲不在随机列表中，随机选择:', this.currentIndex)
               }
             } else {
-              // 没有播放历史，按列表循环处理
-              this.currentIndex = (this.currentIndex - 1 + this.playlist.length) % this.playlist.length
-              console.log('🔀 随机模式无历史，循环到上一首:', this.playlist[this.currentIndex].name)
+              // 如果没有生成随机列表，使用随机选择
+              this.currentIndex = Math.floor(Math.random() * this.playlist.length)
+              console.log('未生成随机列表，随机选择:', this.currentIndex)
             }
           } else {
             // 列表循环
@@ -744,7 +745,7 @@ export default {
           
           // 验证歌曲是否有效（必须有 hash）
           if (!nextSong.hash) {
-            console.warn('⚠️ 歌曲缺少 hash，跳过:', nextSong)
+            console.warn('歌曲缺少 hash，跳过:', nextSong)
             await new Promise(resolve => setTimeout(resolve, 300))
             attempts++
             continue
@@ -752,11 +753,11 @@ export default {
           
           const success = await this.loadSong(nextSong)
           if (success) {
-            console.log('✅ 上一曲加载成功:', nextSong.name)
+            console.log('上一曲加载成功:', nextSong.name)
             return
           }
           
-          console.warn('❌ 上一曲加载失败，尝试下一首...')
+          console.warn('上一曲加载失败，尝试下一首...')
           // 添加短暂延迟，避免过快切换
           await new Promise(resolve => setTimeout(resolve, 500))
           attempts++
@@ -771,7 +772,7 @@ export default {
         // 解除切歌锁，添加防抖延迟
         this.switchSongDebounceTimer = setTimeout(() => {
           this.isSwitchingSong = false
-          console.log('🔓 切歌完成，已解锁')
+          console.log('切歌完成，已解锁')
         }, 300)
       }
     },
@@ -782,7 +783,7 @@ export default {
       
       // 防止并发切歌
       if (this.isSwitchingSong) {
-        console.warn('⚠️ 正在切歌中，忽略本次请求')
+        console.warn('正在切歌中，忽略本次请求')
         return
       }
       
@@ -793,7 +794,7 @@ export default {
       
       // 设置切歌锁
       this.isSwitchingSong = true
-      console.log('🔒 开始切歌（下一曲），已加锁')
+      console.log('开始切歌（下一曲），已加锁')
       
       try {
         const originalIndex = this.currentIndex
@@ -808,38 +809,41 @@ export default {
           
           if (songIndex !== -1) {
             this.currentIndex = songIndex
-            console.log('🎯 播放"下一首播放"队列中的歌曲:', nextSong.name, '索引:', this.currentIndex)
+            console.log('播放"下一首播放"队列中的歌曲:', nextSong.name, '索引:', this.currentIndex)
             
             const success = await this.loadSong(nextSong)
             if (success) {
-              console.log('✅ 下一首播放成功:', nextSong.name)
+              console.log('下一首播放成功:', nextSong.name)
               return
             }
-            console.warn('❌ 下一首播放失败，继续尝试队列中的下一首或正常播放...')
+            console.warn('下一首播放失败，继续尝试队列中的下一首或正常播放...')
             continue // 继续尝试下一首
           }
         }
         
         // 正常播放逻辑
         if (this.playMode === 'shuffle') {
-          // 随机播放：从未播放的歌曲中随机选择
-          const unplayedSongs = this.playlist.filter((song, index) => 
-            !this.playedHistory.includes(index) && index !== this.currentIndex
-          )
-          
-          if (unplayedSongs.length === 0) {
-            // 所有歌曲都播放过了，清空历史重新开始
-            this.playedHistory = [this.currentIndex]
-            const availableSongs = this.playlist.filter((song, index) => index !== this.currentIndex)
-            if (availableSongs.length > 0) {
-              const randomSong = availableSongs[Math.floor(Math.random() * availableSongs.length)]
-              this.currentIndex = this.playlist.findIndex(s => s.hash === randomSong.hash)
+          // 使用预先打乱的播放列表
+          if (this.shuffledPlaylist.length > 0) {
+            // 在已打乱的列表中找到当前位置
+            const shuffledIndex = this.shuffledPlaylist.findIndex(song => song.hash === this.currentSong.hash)
+            if (shuffledIndex !== -1) {
+              // 获取下一首歌曲（在打乱列表中的位置）
+              const nextIndex = (shuffledIndex + 1) % this.shuffledPlaylist.length
+              const nextSong = this.shuffledPlaylist[nextIndex]
+              
+              // 在原始播放列表中找到这首歌的索引
+              this.currentIndex = this.playlist.findIndex(song => song.hash === nextSong.hash)
+              console.log('随机模式下一首:', nextSong.name, '原始索引:', this.currentIndex)
+            } else {
+              // 如果找不到当前歌曲，使用随机选择
+              this.currentIndex = Math.floor(Math.random() * this.playlist.length)
+              console.log('当前歌曲不在随机列表中，随机选择:', this.currentIndex)
             }
           } else {
-            // 从未播放的歌曲中随机选择
-            const randomSong = unplayedSongs[Math.floor(Math.random() * unplayedSongs.length)]
-            this.currentIndex = this.playlist.findIndex(s => s.hash === randomSong.hash)
-            this.playedHistory.push(this.currentIndex)
+            // 如果没有生成随机列表，使用随机选择
+            this.currentIndex = Math.floor(Math.random() * this.playlist.length)
+            console.log('未生成随机列表，随机选择:', this.currentIndex)
           }
         } else {
           // 列表循环
@@ -851,7 +855,7 @@ export default {
         
         // 验证歌曲是否有效（必须有 hash）
         if (!nextSong.hash) {
-          console.warn('⚠️ 歌曲缺少 hash，跳过:', nextSong)
+          console.warn('歌曲缺少 hash，跳过:', nextSong)
           await new Promise(resolve => setTimeout(resolve, 300))
           attempts++
           continue
@@ -859,11 +863,15 @@ export default {
         
         const success = await this.loadSong(nextSong)
         if (success) {
-          console.log('✅ 下一曲加载成功:', nextSong.name)
+          console.log('下一曲加载成功:', nextSong.name)
+          // 更新随机播放的已播放历史
+          if (this.playMode === 'shuffle' && !this.playedHistory.includes(this.currentIndex)) {
+            this.playedHistory.push(this.currentIndex)
+          }
           return
         }
         
-        console.warn('❌ 下一曲加载失败，尝试下一首...')
+        console.warn('下一曲加载失败，尝试下一首...')
         // 添加短暂延迟，避免过快切换
         await new Promise(resolve => setTimeout(resolve, 500))
         attempts++
@@ -877,7 +885,7 @@ export default {
         // 解除切歌锁，添加防抖延迟
         this.switchSongDebounceTimer = setTimeout(() => {
           this.isSwitchingSong = false
-          console.log('🔓 切歌完成，已解锁')
+          console.log('切歌完成，已解锁')
         }, 300)
       }
     },
@@ -980,45 +988,58 @@ export default {
     togglePlayMode() {
       const modes = ['loop', 'single', 'shuffle']
       const currentIndex = modes.indexOf(this.playMode)
-      this.playMode = modes[(currentIndex + 1) % modes.length]
+      const nextMode = modes[(currentIndex + 1) % modes.length]
       
-      // 如果切换到随机模式，初始化已播放历史
-      if (this.playMode === 'shuffle') {
-        this.playedHistory = [this.currentIndex]
-        console.log('切换到随机播放模式，已播放历史:', this.playedHistory)
-      } else {
-        // 切换到其他模式，清空历史
-        this.playedHistory = []
-      }
-      
-      // 保存播放模式到 localStorage
-      localStorage.setItem('player_mode', this.playMode)
+      // 使用 setPlayMode 方法来设置新模式（统一处理逻辑）
+      this.setPlayMode(nextMode)
       
       console.log('切换播放模式:', this.playModeText)
     },
     
     // 设置播放模式（从右键菜单调用）
     setPlayMode(mode) {
+      console.log('设置播放模式:', mode)
       this.playMode = mode
       
-      // 重置播放历史记录
+      // 如果切换到随机播放模式，预先打乱播放列表
       if (mode === 'shuffle') {
-        // 切换到随机模式，初始化已播放历史和播放顺序历史
+        this.generateShuffledPlaylist()
+        // 初始化播放历史
         this.playedHistory = [this.currentIndex]
         this.playOrderHistory = [this.currentIndex]
-        this.historyPointer = -1 // 重置指针
-        console.log('设置为随机播放模式，已播放历史:', this.playedHistory)
+        this.historyPointer = -1
+        console.log('设置为随机播放模式，已生成随机播放列表')
       } else {
-        // 切换到其他模式，清空所有历史
+        // 切换到其他模式，清空随机播放列表和历史
+        this.shuffledPlaylist = []
         this.playedHistory = []
-        this.playOrderHistory = [this.currentIndex] // 保留当前歌曲
-        this.historyPointer = -1 // 重置指针
+        this.playOrderHistory = [this.currentIndex]
+        this.historyPointer = -1
       }
       
       // 保存播放模式到 localStorage
       localStorage.setItem('player_mode', mode)
       
-      console.log('设置播放模式:', this.playModeText)
+      console.log('播放模式已设置为:', this.playModeText)
+    },
+    
+    // 生成随机播放列表
+    generateShuffledPlaylist() {
+      if (this.playlist.length === 0) {
+        this.shuffledPlaylist = []
+        return
+      }
+      
+      // 创建播放列表的副本
+      this.shuffledPlaylist = [...this.playlist]
+      
+      // 使用 Fisher-Yates 洗牌算法打乱列表
+      for (let i = this.shuffledPlaylist.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [this.shuffledPlaylist[i], this.shuffledPlaylist[j]] = [this.shuffledPlaylist[j], this.shuffledPlaylist[i]]
+      }
+      
+      console.log('✅ 生成随机播放列表，共', this.shuffledPlaylist.length, '首歌曲')
     },
     
     // 显示播放模式菜单
@@ -1077,6 +1098,14 @@ export default {
       this.$emit('lyric-view-changed', false)
     },
 
+    // 处理歌词界面的进度跳转
+    handleSeek(time) {
+      const audioEl = this.$refs.audioPlayer
+      if (audioEl && !isNaN(time) && time >= 0 && time <= this.duration) {
+        audioEl.currentTime = time
+        console.log('🎯 跳转到:', time.toFixed(2) + 's')
+      }
+    },
 
     
     // 检查收藏状态
@@ -1157,6 +1186,11 @@ export default {
       
       // 等待抽屉关闭动画完成
       await new Promise(resolve => setTimeout(resolve, 300))
+      
+      // 清空所有历史记录
+      this.playOrderHistory = []
+      this.playedHistory = []
+      this.historyPointer = -1
       
       // 通过事件通知父组件清空播放列表
       this.$emit('clear-playlist')
@@ -1439,10 +1473,11 @@ export default {
 /* 强制覆盖默认布局 */
 .music-player.player-style-netease .player-main {
   display: grid !important;
-  grid-template-columns: auto 1fr auto !important;
-  max-width: none !important;
-  padding: var(--spacing-md) var(--spacing-lg) !important;
+  grid-template-columns: 1fr auto 1fr !important;
+  max-width: 1200px !important;
+  padding: var(--spacing-lg) var(--spacing-xl) !important;
   gap: var(--spacing-xl) !important;
+  justify-content: center;
 }
 
 .player-style-netease .song-cover {
@@ -1474,6 +1509,8 @@ export default {
 .player-style-netease .song-info-section {
   gap: var(--spacing-md);
   justify-content: flex-start !important;
+  max-width: 280px;
+  overflow: hidden;
 }
 
 /* 网易云样式：隐藏左侧的收藏按钮 */
@@ -1506,6 +1543,7 @@ export default {
   width: 100%;
   max-width: 500px;
   margin: 0 auto;
+  flex-shrink: 0;
 }
 
 .player-style-netease .control-buttons {
@@ -1527,6 +1565,8 @@ export default {
 /* 网易云样式：右侧区域靠右对齐 */
 .player-style-netease .player-extras-section {
   justify-content: flex-end;
+  width: 280px;
+  flex-shrink: 0;
 }
 
 /* 网易云样式：进度条包装器 */
