@@ -4,8 +4,8 @@
   font-weight: 400;
 
   color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+  color: var(--text-white-alpha-light);
+  background-color: var(--bg-dark-default);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -15,11 +15,11 @@
 
 a {
   font-weight: 500;
-  color: #646cff;
+  color: var(--link-color);
   text-decoration: inherit;
 }
 a:hover {
-  color: #535bf2;
+  color: var(--link-hover);
 }
 
 body {
@@ -36,13 +36,13 @@ body {
 
 @media (prefers-color-scheme: light) {
   :root {
-    color: #213547;
-    background-color: #ffffff;
+    color: var(--text-dark);
+    background-color: var(--bg-light-theme);
   }
   a:hover {
-    color: #747bff;
+    color: var(--link-light);
   }
   button {
-    background-color: #f9f9f9;
+    background-color: var(--bg-button-light);
   }
 }

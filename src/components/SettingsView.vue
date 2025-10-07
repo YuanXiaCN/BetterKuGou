@@ -354,6 +354,8 @@
           <div class="setting-item setting-item--actions">
             <button class="outline-btn" type="button">检查更新</button>
             <button class="outline-btn" type="button">反馈 / 建议</button>
+            <button class="outline-btn" type="button">使用协议</button>
+            <button class="outline-btn" type="button">项目主页（真的不给个Star嘛）</button>
           </div>
           <div class="setting-item setting-item--center">
             <img class="software-logo" src="/logo.png" alt="BetterKugou Logo">

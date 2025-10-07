@@ -16,6 +16,9 @@
 - **无广告**：纯净体验
 - **多平台支持**：Windows、macOS、Linux
 
+## 更新日志
+详见 [updata_log.md](./updata_log.md)。
+
 ## 快速开始
 
 ### 下载安装
@@ -53,6 +56,7 @@
 - 支持主题切换、配色自定义、布局调整
 - 插件系统，欢迎开发和分享你的插件
 - 丰富的动画 API，轻松实现全局动效
+PS：主题开发请查看 [主题文档](https://github.com/YuanXiaCN/BetterKuGou/blob/master/src/styles/README.md)
 
 
 ## 贡献指南
@@ -76,6 +80,9 @@
 - Q：会出手机端吗？
 - A: 暂不支持手机端，但是后续考虑在移动设备上适配单独的移动端版本。
 
+## 后续规划
+[TodoList](https://github.com/YuanXiaCN/BetterKuGou/blob/master/todo)
+
 ## 许可证
 
 本项目基于 MIT License 开源，详见 [LICENSE](LICENSE)。
@@ -87,6 +94,8 @@
 
 ---
 
+> 作者：鸢夏 <1925019494@qq.com> 
+> 反馈Q群：[点击加入](https://qm.qq.com/q/H9g8tVztKg)
 > 作者：鸢夏 <1925019494@qq.com>
 > 
 > 项目主页：[https://github.com/YuanXiaCN/BetterKuGou](https://github.com/YuanXiaCN/BetterKuGou)

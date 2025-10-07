@@ -146,10 +146,10 @@ export default {
 .context-menu {
   position: fixed;
   min-width: 180px;
-  background: rgba(30, 30, 30, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--bg-menu);
+  border: 1px solid var(--border-light-alpha);
   border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-menu);
   padding: 4px;
   z-index: 10000;
   backdrop-filter: blur(10px);
@@ -172,7 +172,7 @@ export default {
   align-items: center;
   padding: 8px 12px;
   cursor: pointer;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--text-white-alpha);
   font-size: 13px;
   border-radius: 4px;
   transition: all 0.15s ease;
@@ -181,8 +181,8 @@ export default {
 }
 
 .menu-item:not(.divider):not(.disabled):hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  background: var(--bg-hover);
+  color: var(--text-white);
 }
 
 .menu-item.disabled {
@@ -194,7 +194,7 @@ export default {
   height: 1px;
   padding: 0;
   margin: 4px 8px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--bg-hover);
   cursor: default;
 }
 

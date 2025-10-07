@@ -58,7 +58,7 @@
               class="rank-item"
               @click="handleRankClick(rank)"
             >
-              <img v-if="rank.imgurl" :src="rank.imgurl" class="rank-icon" />
+              <img v-if="rank.imgurl" :src="fixImgUrl(rank.imgurl)" class="rank-icon" />
               <span class="rank-name">{{ rank.rankname }}</span>
             </div>
           </div>
@@ -85,7 +85,7 @@
       </div>
 
       <div v-if="aiLoading" class="ai-loading">
-        <div class="loading-spinner"></div>
+        <img src="../icon/loding.gif" alt="加载中" class="loading-gif" />
         <p>AI 正在为你生成推荐...</p>
       </div>
 
@@ -104,7 +104,7 @@
           @click="handleSongClick(song)"
         >
           <div class="song-cover">
-            <img v-if="song.imgurl" :src="song.imgurl" :alt="song.songname" />
+            <img v-if="song.imgurl" :src="fixImgUrl(song.imgurl)" :alt="song.songname" />
             <div class="play-overlay">
               <svg viewBox="0 0 1024 1024" width="32" height="32" fill="white">
                 <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372z"/>
@@ -157,6 +157,11 @@ export default {
     this.loadData()
   },
   methods: {
+    // 修正图片URL中的{size}
+    fixImgUrl(url) {
+      if (!url) return '';
+      return url.replace('{size}', '150');
+    },
     async loadData() {
       await Promise.all([
         this.loadPersonalFM(),
@@ -175,8 +180,8 @@ export default {
         console.log('Personal FM data:', response.data)
         
         if (response.status === 1 && response.data) {
-          // 私人FM返回的是songs数组
-          this.fmCount = response.data.songs?.length || response.data.hotsong_num || 0
+          // 私人FM返回的数据结构：data.hotsong_num 是数量
+          this.fmCount = response.data.hotsong_num || 0
         }
       } catch (error) {
         console.error('加载私人 FM 失败:', error)
@@ -194,8 +199,8 @@ export default {
         console.log('Daily Recommend data:', response.data)
         
         if (response.status === 1 && response.data) {
-          // 每日推荐返回的是song_list数组或者直接使用song_list_size
-          this.dailyCount = response.data.song_list?.length || response.data.song_list_size || 0
+          // 每日推荐 song_list 是数组，song_list_size 是数量
+          this.dailyCount = Array.isArray(response.data.song_list) ? response.data.song_list.length : (response.data.song_list_size || 0)
         }
       } catch (error) {
         console.error('加载每日推荐失败:', error)
@@ -210,9 +215,15 @@ export default {
         this.rankLoading = true
         const response = await getRankList()
         console.log('Rank List:', response)
+        console.log('Rank List data:', response.data)
         
         if (response.status === 1 && response.data) {
-          this.rankList = response.data.info || []
+          // 排行榜 info 是榜单数组
+          const rankData = response.data.info || [];
+          this.rankList = rankData.map(rank => ({
+            ...rank,
+            imgurl: rank.imgurl || rank.banner7url || rank.banner6url || ''
+          }));
         }
       } catch (error) {
         console.error('加载排行榜失败:', error)
@@ -236,9 +247,18 @@ export default {
         this.aiLoading = true
         const response = await getAIRecommend(recentSongIds)
         console.log('AI Recommend:', response)
+        console.log('AI Recommend data:', response.data)
         
         if (response.status === 1 && response.data) {
-          this.aiRecommendList = response.data.list || []
+          // AI推荐 song_list 是推荐歌曲数组
+          const songs = response.data.song_list || [];
+          // 处理封面字段，优先使用 trans_param.union_cover，其次尝试 relate_goods[0].info.image
+          this.aiRecommendList = songs.map(song => ({
+            ...song,
+            imgurl: song.imgurl || song.trans_param?.union_cover || 
+                   (song.relate_goods && song.relate_goods.length > 0 && song.relate_goods[0].info ? 
+                   song.relate_goods[0].info.image : '')
+          }));
         }
       } catch (error) {
         console.error('加载 AI 推荐失败:', error)
@@ -288,8 +308,18 @@ export default {
     
     // 点击歌曲
     handleSongClick(song) {
-      console.log('Play song:', song)
-      this.$emit('play', song)
+      console.log('[HomeView] Play song:', song)
+      // 规范化歌曲数据字段
+      const normalizedSong = {
+        ...song,
+        name: song.songname || song.filename || song.name,
+        singername: song.author_name || song.singername,
+        author_name: song.author_name || song.singername,
+        cover: song.trans_param?.union_cover || song.imgurl || song.album_img,
+        album_name: song.album_name || song.remark,
+        timelen: song.duration || song.time_length || song.timelen
+      }
+      this.$emit('play', normalizedSong)
     }
   }
 }
@@ -375,11 +405,11 @@ export default {
 }
 
 .card-icon-daily {
-  background: linear-gradient(135deg, #ff6b6b, #ff8787);
+  background: var(--gradient-secondary);
 }
 
 .card-icon-rank {
-  background: linear-gradient(135deg, #ffd700, #ffed4e);
+  background: var(--gradient-gold);
 }
 
 .card-content {
@@ -526,20 +556,10 @@ export default {
   color: var(--color-text-secondary);
 }
 
-.loading-spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid var(--color-border);
-  border-top-color: var(--color-primary);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+.loading-gif {
+  width: 60px;
+  height: 60px;
   margin-bottom: var(--spacing-md);
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .ai-empty {
@@ -597,7 +617,7 @@ export default {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--bg-overlay);
   display: flex;
   align-items: center;
   justify-content: center;

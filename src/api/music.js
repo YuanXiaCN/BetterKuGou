@@ -53,7 +53,7 @@ apiClient.interceptors.response.use(
  * @returns {Promise}
  */
 export const getPersonalFM = () => {
-  return apiClient.get('/personal/fm')
+  return apiClient.post('/personal/fm')
 }
 
 /**
@@ -61,7 +61,7 @@ export const getPersonalFM = () => {
  * @returns {Promise}
  */
 export const getEverydayRecommend = () => {
-  return apiClient.get('/everyday/recommend')
+  return apiClient.post('/everyday/recommend')
 }
 
 /**
@@ -87,12 +87,12 @@ export const getRankInfo = (rankid, page = 1, pagesize = 30) => {
 
 /**
  * 获取 AI 推荐
- * @param {string} audio_id - 歌曲 ID，多个用逗号分隔
+ * @param {string} album_audio_id - 歌曲 ID，多个用逗号分隔
  * @returns {Promise}
  */
-export const getAIRecommend = (audio_id) => {
-  return apiClient.get('/ai/recommend', {
-    params: { audio_id }
+export const getAIRecommend = (album_audio_id) => {
+  return apiClient.post('/ai/recommend', {
+    album_audio_id
   })
 }
 
