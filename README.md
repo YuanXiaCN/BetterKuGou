@@ -96,4 +96,6 @@ PS：主题开发请查看 [主题文档](https://github.com/YuanXiaCN/BetterKuG
 
 > 作者：鸢夏 <1925019494@qq.com> 
 > 反馈Q群：[点击加入](https://qm.qq.com/q/H9g8tVztKg)
+> 作者：鸢夏 <1925019494@qq.com>
+> 
 > 项目主页：[https://github.com/YuanXiaCN/BetterKuGou](https://github.com/YuanXiaCN/BetterKuGou)
