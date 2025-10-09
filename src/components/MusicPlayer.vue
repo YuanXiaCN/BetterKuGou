@@ -620,6 +620,15 @@ export default {
         }
         
         console.log('🎵 [LoadSong] 加载完成，返回 true')
+        
+        // 主动发出 song-changed 事件，确保父组件收到更新
+        try {
+          console.log('🎵 [LoadSong] 发出 song-changed 事件:', this.currentSong?.name)
+          this.$emit('song-changed', this.currentSong)
+        } catch (error) {
+          console.error('🎵 [LoadSong] 发出 song-changed 事件失败:', error)
+        }
+        
         return true
       } catch (error) {
         console.error('🎵 [LoadSong] 加载歌曲失败:', error)

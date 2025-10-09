@@ -73,8 +73,8 @@
         <div class="col-duration">
           {{ formatDuration(song.timelen) }}
           <div class="action-buttons">
-            <button class="icon-btn play-btn-inline" @click.stop="playSong(song)" :title="currentPlayingHash === song.hash ? '暂停' : '播放'">
-              <svg v-if="currentPlayingHash === song.hash" viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
+            <button class="icon-btn play-btn-inline" @click.stop="playSong(song)" :title="isCurrentlyPlaying(song) ? '暂停' : '播放'">
+              <svg v-if="isCurrentlyPlaying(song)" viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
                 <path d="M304 176h80v672h-80zm336 0h80v672h-80z"/>
               </svg>
               <svg v-else viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
@@ -229,6 +229,8 @@ export default {
   mounted() {
     this.loadFavorites()
     
+    console.log('🔧 [FavoriteView] 组件已挂载，isCurrentlyPlaying 方法可用:', typeof this.isCurrentlyPlaying)
+    
     // 调试：监听 currentSong 变化
     this.$watch('currentSong', (newVal, oldVal) => {
       console.log('🎵 [FavoriteView] currentSong 变化:', {
@@ -238,28 +240,102 @@ export default {
         newName: newVal?.name
       })
     }, { deep: true })
+    
+    // 调试：监听 currentPlayingHash 变化
+    this.$watch('currentPlayingHash', (newVal, oldVal) => {
+      console.log('🎵 [FavoriteView] currentPlayingHash 变化:', {
+        old: oldVal,
+        new: newVal
+      })
+      // 强制触发一次重新渲染检查
+      this.$nextTick(() => {
+        console.log('🔄 [FavoriteView] 下一个tick，强制检查高亮状态')
+        // 检查当前播放歌曲是否在收藏列表中
+        if (this.favoriteList.length > 0) {
+          this.checkCurrentSongInFavorites()
+        }
+      })
+    })
   },
   methods: {
     // 检查是否为当前播放歌曲
     isCurrentlyPlaying(song) {
-      console.log('[FavoriteView] isCurrentlyPlaying 检查:')
-      console.log('  - 歌曲名:', song.name)
-      console.log('  - 歌曲hash:', song.hash)
-      console.log('  - currentPlayingHash:', this.currentPlayingHash)
-      console.log('  - currentSong:', this.currentSong?.name)
-      console.log('  - currentSong.hash:', this.currentSong?.hash)
+      // 只在找到匹配时或第一首和最后一首歌时输出详细日志
+      const shouldLog = this.favoriteList.indexOf(song) === 0 || 
+                       this.favoriteList.indexOf(song) === this.favoriteList.length - 1 ||
+                       (this.currentPlayingHash && this.currentPlayingHash === song.hash) ||
+                       (this.currentSong && this.currentSong.hash === song.hash)
+      
+      if (shouldLog) {
+        console.log('[FavoriteView] isCurrentlyPlaying 检查:')
+        console.log('  - 歌曲名:', song.name)
+        console.log('  - 歌曲hash:', song.hash)
+        console.log('  - currentPlayingHash:', this.currentPlayingHash)
+        console.log('  - currentSong:', this.currentSong?.name)
+        console.log('  - currentSong.hash:', this.currentSong?.hash)
+        console.log('  - 收藏列表总数:', this.favoriteList.length)
+        console.log('  - 当前歌曲在列表中的索引:', this.favoriteList.indexOf(song))
+      }
       
       // 检查多种匹配方式
       const hashMatch = this.currentPlayingHash && this.currentPlayingHash === song.hash
       const songMatch = this.currentSong && this.currentSong.hash === song.hash
       
-      console.log('  - hash匹配:', hashMatch)
-      console.log('  - song匹配:', songMatch)
+      if (shouldLog) {
+        console.log('  - hash匹配:', hashMatch)
+        console.log('  - song匹配:', songMatch)
+      }
       
       const result = hashMatch || songMatch
-      console.log('  - 最终结果:', result ? '匹配' : '不匹配')
+      
+      if (shouldLog) {
+        console.log('  - 最终结果:', result ? '✅ 匹配' : '❌ 不匹配')
+      }
+      
+      // 如果匹配成功，输出一条醒目的日志
+      if (result) {
+        console.log('🎯 [FavoriteView] 找到匹配的歌曲!', song.name)
+      }
       
       return result
+    },
+    
+    // 调试方法：检查当前播放歌曲是否在收藏列表中
+    checkCurrentSongInFavorites() {
+      if (!this.currentSong || !this.currentPlayingHash) {
+        console.log('🔍 [FavoriteView] 当前没有播放歌曲')
+        return
+      }
+      
+      console.log('🔍 [FavoriteView] 检查当前播放歌曲是否在收藏列表中:')
+      console.log('  - 当前播放:', this.currentSong.name)
+      console.log('  - Hash:', this.currentPlayingHash)
+      console.log('  - 收藏列表总数:', this.favoriteList.length)
+      
+      // 按Hash查找
+      const foundByHash = this.favoriteList.find(song => song.hash === this.currentPlayingHash)
+      if (foundByHash) {
+        console.log('  - ✅ 通过Hash找到:', foundByHash.name)
+        return foundByHash
+      }
+      
+      // 按歌曲名查找（模糊匹配）
+      const currentName = this.currentSong.name.toLowerCase()
+      const foundByName = this.favoriteList.find(song => {
+        return song.name && song.name.toLowerCase().includes(currentName.split(' - ').pop())
+      })
+      
+      if (foundByName) {
+        console.log('  - 🔍 通过歌名找到可能匹配:', foundByName.name, 'Hash:', foundByHash.hash)
+      } else {
+        console.log('  - ❌ 在收藏列表中没有找到当前播放的歌曲')
+        console.log('  - 💡 这可能说明：')
+        console.log('    1. 歌曲确实不在收藏列表中')
+        console.log('    2. Hash不匹配（同一首歌的不同版本）')
+        console.log('    3. 收藏列表加载不完整')
+      }
+      
+      return foundByHash || foundByName
     },
     
     // 加载收藏列表
