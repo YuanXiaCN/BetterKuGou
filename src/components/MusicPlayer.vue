@@ -358,7 +358,7 @@ export default {
             console.log('正在切歌中，忽略外部 song prop 变化')
             return
           }
-          console.log('外部传入新歌曲，加载:', newSong.name || newSong.filename)
+          console.log('🎵 [外部Song] 外部传入新歌曲，加载:', newSong.name || newSong.filename)
           this.currentSong = newSong
           this.loadSong(newSong)
         }
@@ -411,33 +411,58 @@ export default {
         // 注意：不在这里触发 loadSong，由 playNext/playPrevious 等方法直接调用
         // 只在索引改变后通知父组件（但不触发重复加载）
         if (newIndex !== -1 && this.playlist[newIndex] && !this.isSwitchingSong) {
+          console.log('🎵 [IndexChange] 通知父组件歌曲变化:', {
+            newIndex,
+            song: this.playlist[newIndex]?.name || this.playlist[newIndex]?.filename,
+            currentSong: this.currentSong?.name || this.currentSong?.filename
+          })
           this.$emit('song-changed', this.playlist[newIndex])
         }
       }
     }
   },
   mounted() {
-    // 从 localStorage 恢复音量和播放模式
-    const savedVolume = localStorage.getItem('player_volume')
-    if (savedVolume) {
-      this.volume = parseInt(savedVolume)
-      this.$refs.audioPlayer.volume = this.volume / 100
-    }
-    
-    const savedMode = localStorage.getItem('player_mode')
-    if (savedMode && ['loop', 'single', 'shuffle'].includes(savedMode)) {
-      this.playMode = savedMode
-    }
-    
-    // 初始化系统媒体控制
-    this.initMediaSessionHandlers()
-    
-    // 启动 RAF 循环进行高频时间更新
-    this.startTimeUpdate()
+    // 添加全局错误处理
+    this.$nextTick(() => {
+      try {
+        // 从 localStorage 恢复音量和播放模式
+        const savedVolume = localStorage.getItem('player_volume')
+        if (savedVolume) {
+          this.volume = parseInt(savedVolume)
+          if (this.$refs.audioPlayer) {
+            this.$refs.audioPlayer.volume = this.volume / 100
+          }
+        }
+        
+        const savedMode = localStorage.getItem('player_mode')
+        if (savedMode && ['loop', 'single', 'shuffle'].includes(savedMode)) {
+          this.playMode = savedMode
+        }
+        
+        // 初始化系统媒体控制
+        this.initMediaSessionHandlers()
+        
+        // 启动 RAF 循环进行高频时间更新
+        this.startTimeUpdate()
+      } catch (error) {
+        console.error('MusicPlayer mounted 初始化错误:', error)
+      }
+    })
   },
   beforeUnmount() {
     // 组件销毁前停止 RAF 循环
     this.stopTimeUpdate()
+    
+    // 清理音频元素
+    if (this.$refs.audioPlayer) {
+      this.$refs.audioPlayer.pause()
+      this.$refs.audioPlayer.src = ''
+    }
+    
+    // 清理定时器
+    if (this.switchSongDebounceTimer) {
+      clearTimeout(this.switchSongDebounceTimer)
+    }
   },
   methods: {
     // 加载歌曲
@@ -446,8 +471,17 @@ export default {
       const previousSong = this.currentSong
       const wasPlaying = this.isPlaying
       
+      console.log('🎵 [LoadSong] 开始加载歌曲:', {
+        songName: song.name || song.filename,
+        songHash: song.hash,
+        previousSong: previousSong?.name || previousSong?.filename,
+        previousSongHash: previousSong?.hash,
+        wasPlaying,
+        currentIndex: this.currentIndex,
+        isSwitchingSong: this.isSwitchingSong
+      })
+      
       try {
-        console.log('开始加载歌曲:', song)
         
         // 第一步：获取歌曲详细信息（如果需要）
         let audioDetail = song
@@ -500,17 +534,29 @@ export default {
           }
           
           if (playUrl && typeof playUrl === 'string') {
-            console.log('🎵 设置音频源')
+            console.log('🎵 [LoadSong] 设置音频源:', playUrl)
             const audioEl = this.$refs.audioPlayer
             audioEl.src = playUrl
+            
+            console.log('🎵 [LoadSong] 更新 currentSong 前:', {
+              oldCurrentSong: this.currentSong?.name || this.currentSong?.filename,
+              oldCurrentSongHash: this.currentSong?.hash,
+              newSong: song.name || song.filename,
+              newSongHash: song.hash
+            })
             
             // 只在成功获取播放地址后才更新 currentSong
             this.currentSong = song
             
+            console.log('🎵 [LoadSong] 更新 currentSong 后:', {
+              currentSong: this.currentSong?.name || this.currentSong?.filename,
+              currentSongHash: this.currentSong?.hash
+            })
+            
             // 自动播放
             try {
               await audioEl.play()
-              console.log('播放成功')
+              console.log('🎵 [LoadSong] 播放成功')
               
               // 设置系统媒体会话信息 (SMTC)
               this.updateMediaSession(audioDetail)
@@ -550,11 +596,13 @@ export default {
           return false
         }
         
+        console.log('🎵 [LoadSong] 加载完成，返回 true')
         return true
       } catch (error) {
-        console.error('加载歌曲失败:', error)
+        console.error('🎵 [LoadSong] 加载歌曲失败:', error)
         this.showError(`加载歌曲失败: ${error.response?.data?.msg || error.message}`)
         // 恢复之前的歌曲
+        console.log('🎵 [LoadSong] 恢复之前的歌曲:', previousSong?.name || previousSong?.filename)
         this.currentSong = previousSong
         return false
       }
@@ -892,12 +940,28 @@ export default {
     
     // RAF 驱动的高频时间更新（60fps）
     updateTimeLoop() {
-      const audioEl = this.$refs.audioPlayer
-      if (audioEl && !this.isDragging) {
-        this.currentTime = audioEl.currentTime
+      try {
+        // 检查组件是否已卸载
+        if (!this.$el || !this.$refs.audioPlayer) {
+          return
+        }
+        
+        const audioEl = this.$refs.audioPlayer
+        if (audioEl && !this.isDragging && !isNaN(audioEl.currentTime)) {
+          // 只在时间有明显变化时更新，减少不必要的响应式更新
+          const newTime = audioEl.currentTime
+          if (Math.abs(newTime - this.currentTime) > 0.1) {
+            this.currentTime = newTime
+          }
+        }
+        
+        // 持续循环
+        this.rafId = requestAnimationFrame(this.updateTimeLoop)
+      } catch (error) {
+        console.error('时间更新循环错误:', error)
+        // 停止循环以防止连续错误
+        this.stopTimeUpdate()
       }
-      // 持续循环
-      this.rafId = requestAnimationFrame(this.updateTimeLoop)
     },
     
     // 启动时间更新循环
@@ -1137,24 +1201,49 @@ export default {
     // 播放列表中的歌曲
     async handlePlaylistPlay(song) {
       const index = this.playlist.findIndex(s => s.hash === song.hash)
+      console.log('🎵 [PlaylistPlay] 开始处理播放请求:', {
+        songName: song.name || song.filename,
+        songHash: song.hash,
+        foundIndex: index,
+        currentIndex: this.currentIndex,
+        currentSongHash: this.currentSong?.hash,
+        currentSongName: this.currentSong?.name || this.currentSong?.filename
+      })
+      
       if (index !== -1) {
         const previousIndex = this.currentIndex
+        console.log('🎵 [PlaylistPlay] 更新索引:', { from: previousIndex, to: index })
         this.currentIndex = index
         
-        console.log('🎵 用户手动点击播放:', song.name, '索引:', index)
+        console.log('🎵 [PlaylistPlay] 调用 loadSong 前状态:', {
+          currentSong: this.currentSong?.name || this.currentSong?.filename,
+          targetSong: song.name || song.filename,
+          isPlaying: this.isPlaying
+        })
+        
         const success = await this.loadSong(song)
         
+        console.log('🎵 [PlaylistPlay] loadSong 完成:', {
+          success,
+          currentSong: this.currentSong?.name || this.currentSong?.filename,
+          currentSongHash: this.currentSong?.hash,
+          targetSongHash: song.hash,
+          isPlaying: this.isPlaying
+        })
+        
         if (success) {
-          console.log('✅ 手动播放成功')
+          console.log('✅ [PlaylistPlay] 手动播放成功')
           // 如果是随机模式，添加到已播放历史
           if (this.playMode === 'shuffle' && !this.playedHistory.includes(index)) {
             this.playedHistory.push(index)
           }
         } else {
-          console.warn('❌ 手动播放失败，恢复原索引')
+          console.warn('❌ [PlaylistPlay] 手动播放失败，恢复原索引')
           this.currentIndex = previousIndex
           this.showError(`无法播放《${song.name}》`)
         }
+      } else {
+        console.warn('❌ [PlaylistPlay] 在播放列表中未找到歌曲:', song.name || song.filename)
       }
     },
     
