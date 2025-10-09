@@ -1,4 +1,4 @@
-# BetterKuGou 0.1.2-alpha-pre1 更新日志
+# BetterKuGou 0.1.2-alpha-pre2 更新日志
 
 ## 修复
 - 内存清理导致歌单仅剩余50首

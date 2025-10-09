@@ -50,7 +50,7 @@
         v-for="(song, index) in sortedFavoriteList" 
         :key="song.hash"
         class="song-item"
-        :class="{ playing: currentPlayingHash && currentPlayingHash === song.hash }"
+        :class="{ playing: isCurrentlyPlaying(song) }"
         @dblclick="playSong(song)"
         @contextmenu.prevent.stop="showContextMenu($event, song)"
       >
@@ -118,12 +118,6 @@ export default {
       default: null
     }
   },
-  computed: {
-    // 安全地获取当前播放歌曲的 hash
-    currentPlayingHash() {
-      return this.currentSong?.hash || null
-    }
-  },
   setup() {
     const { settings } = useSettingsStore()
     return { settings }
@@ -136,13 +130,21 @@ export default {
       contextMenuVisible: false,
       contextMenuPosition: { x: 0, y: 0 },
       currentContextSong: null,
-      sortOrder: 'none' // 排序状态: 'none', 'asc', 'desc'
+      sortOrder: 'none', // 排序状态: 'none', 'asc', 'desc'
+      isPlayingSong: false // 防止重复播放请求
     }
   },
   computed: {
     // 安全地获取当前播放歌曲的 hash
     currentPlayingHash() {
-      return this.currentSong?.hash || null
+      const hash = this.currentSong?.hash || null
+      console.log('🎵 [FavoriteView] currentPlayingHash 计算:', {
+        currentSong: this.currentSong,
+        hash: hash,
+        name: this.currentSong?.name || this.currentSong?.filename,
+        timestamp: new Date().toLocaleTimeString()
+      })
+      return hash
     },
     // 计算排序后的歌曲列表
     sortedFavoriteList() {
@@ -207,6 +209,23 @@ export default {
       ]
     }
   },
+  watch: {
+    currentSong: {
+      handler(newSong, oldSong) {
+        // 监听当前播放歌曲的变化，用于调试
+        console.log('🎵 [FavoriteView] currentSong changed', {
+          old: oldSong ? oldSong.hash : null,
+          new: newSong ? newSong.hash : null,
+          oldName: oldSong ? oldSong.name : null,
+          newName: newSong ? newSong.name : null
+        });
+        
+        // 强制重新渲染组件，确保UI状态与数据状态保持一致
+        this.$forceUpdate()
+      },
+      deep: true
+    }
+  },
   mounted() {
     this.loadFavorites()
     
@@ -221,6 +240,28 @@ export default {
     }, { deep: true })
   },
   methods: {
+    // 检查是否为当前播放歌曲
+    isCurrentlyPlaying(song) {
+      console.log('[FavoriteView] isCurrentlyPlaying 检查:')
+      console.log('  - 歌曲名:', song.name)
+      console.log('  - 歌曲hash:', song.hash)
+      console.log('  - currentPlayingHash:', this.currentPlayingHash)
+      console.log('  - currentSong:', this.currentSong?.name)
+      console.log('  - currentSong.hash:', this.currentSong?.hash)
+      
+      // 检查多种匹配方式
+      const hashMatch = this.currentPlayingHash && this.currentPlayingHash === song.hash
+      const songMatch = this.currentSong && this.currentSong.hash === song.hash
+      
+      console.log('  - hash匹配:', hashMatch)
+      console.log('  - song匹配:', songMatch)
+      
+      const result = hashMatch || songMatch
+      console.log('  - 最终结果:', result ? '匹配' : '不匹配')
+      
+      return result
+    },
+    
     // 加载收藏列表
     async loadFavorites() {
       this.loading = true
@@ -365,33 +406,50 @@ export default {
     
     // 播放歌曲
     playSong(song) {
-      console.log('[FavoriteView] playSong 调用:', song.name)
-      console.log('[FavoriteView] 当前 currentSong:', this.currentSong?.name)
-      console.log('[FavoriteView] 当前 currentPlayingHash:', this.currentPlayingHash)
-      console.log('[FavoriteView] 歌曲 hash:', song.hash)
-      console.log('设置 - enqueueFullPlaylist:', this.settings?.playback?.enqueueFullPlaylist)
+      // 防止重复快速点击
+      if (this.isPlayingSong) {
+        console.log('[FavoriteView] 正在处理播放请求，忽略重复操作')
+        return
+      }
       
-      // 检查是否开启了"自动将全部歌单歌曲加入播放列表"功能
-      if (this.settings?.playback?.enqueueFullPlaylist && this.favoriteList.length > 0) {
-        console.log('自动加入全部歌曲到播放列表')
-        // 找到当前歌曲在列表中的索引
-        const songIndex = this.favoriteList.findIndex(s => s.hash === song.hash)
+      this.isPlayingSong = true
+      
+      try {
+        console.log('[FavoriteView] playSong 调用:', song.name)
+        console.log('[FavoriteView] 当前 currentSong:', this.currentSong?.name)
+        console.log('[FavoriteView] 当前 currentPlayingHash:', this.currentPlayingHash)
+        console.log('[FavoriteView] 歌曲 hash:', song.hash)
+        console.log('设置 - enqueueFullPlaylist:', this.settings?.playback?.enqueueFullPlaylist)
         
-        if (songIndex !== -1) {
-          // 重新排列歌单,让当前歌曲排在第一位
-          const reorderedList = [
-            song,
-            ...this.favoriteList.slice(0, songIndex),
-            ...this.favoriteList.slice(songIndex + 1)
-          ]
-          this.$emit('play-all', reorderedList)
+        // 检查是否开启了"自动将全部歌单歌曲加入播放列表"功能
+        if (this.settings?.playback?.enqueueFullPlaylist && this.favoriteList.length > 0) {
+          console.log('自动加入全部歌曲到播放列表')
+          // 找到当前歌曲在列表中的索引
+          const songIndex = this.favoriteList.findIndex(s => s.hash === song.hash)
+          
+          if (songIndex !== -1) {
+            // 重新排列歌单,让当前歌曲排在第一位
+            const reorderedList = [
+              song,
+              ...this.favoriteList.slice(0, songIndex),
+              ...this.favoriteList.slice(songIndex + 1)
+            ]
+            this.$emit('play-all', reorderedList)
+          } else {
+            // 如果找不到,就正常播放全部
+            this.$emit('play-all', this.favoriteList)
+          }
         } else {
-          // 如果找不到,就正常播放全部
-          this.$emit('play-all', this.favoriteList)
+          // 只播放单曲
+          this.$emit('play', song)
         }
-      } else {
-        // 只播放单曲
-        this.$emit('play', song)
+      } catch (error) {
+        console.error('[FavoriteView] playSong 错误:', error)
+      } finally {
+        // 延迟重置标志，防止快速点击
+        setTimeout(() => {
+          this.isPlayingSong = false
+        }, 500)
       }
     },
     

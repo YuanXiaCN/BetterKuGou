@@ -367,18 +367,37 @@ export default {
     },
     // 监听播放列表变化
     playlist: {
-      handler(newPlaylist) {
-        console.log('播放列表更新:', newPlaylist.length, '首歌曲')
-        // 播放列表变化时不重置历史记录,只确保 currentIndex 在有效范围内
-        if (this.currentIndex >= newPlaylist.length) {
-          this.currentIndex = Math.max(0, newPlaylist.length - 1)
-          console.log('调整 currentIndex 到有效范围:', this.currentIndex)
-        }
-        
-        // 如果在随机播放模式下，重新生成随机播放列表
-        if (this.playMode === 'shuffle' && newPlaylist.length > 0) {
-          this.generateShuffledPlaylist()
-          console.log('播放列表变化，重新生成随机播放列表')
+      handler(newPlaylist, oldPlaylist) {
+        try {
+          if (!Array.isArray(newPlaylist)) {
+            console.error('播放列表不是数组:', newPlaylist)
+            return
+          }
+          
+          console.log('播放列表更新:', newPlaylist.length, '首歌曲')
+          
+          // 如果播放列表被完全清空，重置相关状态
+          if (newPlaylist.length === 0) {
+            this.currentIndex = 0
+            this.playedHistory = []
+            this.shuffledPlaylist = []
+            console.log('播放列表已清空，重置状态')
+            return
+          }
+          
+          // 播放列表变化时不重置历史记录,只确保 currentIndex 在有效范围内
+          if (this.currentIndex >= newPlaylist.length) {
+            this.currentIndex = Math.max(0, newPlaylist.length - 1)
+            console.log('调整 currentIndex 到有效范围:', this.currentIndex)
+          }
+          
+          // 如果在随机播放模式下，重新生成随机播放列表
+          if (this.playMode === 'shuffle' && newPlaylist.length > 0) {
+            this.generateShuffledPlaylist()
+            console.log('播放列表变化，重新生成随机播放列表')
+          }
+        } catch (error) {
+          console.error('处理播放列表变化时出错:', error)
         }
       },
       deep: true
@@ -411,12 +430,16 @@ export default {
         // 注意：不在这里触发 loadSong，由 playNext/playPrevious 等方法直接调用
         // 只在索引改变后通知父组件（但不触发重复加载）
         if (newIndex !== -1 && this.playlist[newIndex] && !this.isSwitchingSong) {
-          console.log('🎵 [IndexChange] 通知父组件歌曲变化:', {
-            newIndex,
-            song: this.playlist[newIndex]?.name || this.playlist[newIndex]?.filename,
-            currentSong: this.currentSong?.name || this.currentSong?.filename
-          })
-          this.$emit('song-changed', this.playlist[newIndex])
+          try {
+            console.log('🎵 [IndexChange] 通知父组件歌曲变化:', {
+              newIndex,
+              song: this.playlist[newIndex]?.name || this.playlist[newIndex]?.filename,
+              currentSong: this.currentSong?.name || this.currentSong?.filename
+            })
+            this.$emit('song-changed', this.playlist[newIndex])
+          } catch (error) {
+            console.error('🎵 [IndexChange] 通知父组件时出错:', error)
+          }
         }
       }
     }

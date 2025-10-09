@@ -17,6 +17,12 @@ import { cloneDeep } from './utils/objectUtils.js'
 
 console.log('App.vue loaded')
 
+// 全局错误处理
+const handleGlobalError = (error, info) => {
+  console.error('全局错误:', error, info)
+  // 这里可以添加错误报告或用户提示
+}
+
 // 控制显示登录界面
 const showLogin = ref(false)
 
@@ -175,18 +181,31 @@ const handlePlay = (song) => {
   }
 }
 
-// 处理播放全部
-const handlePlayAll = (songs) => {
+// 处理播放所有歌曲
+const handlePlayAll = async (songs) => {
   console.log('Play all songs:', songs)
-  if (songs && songs.length > 0) {
-    // 清空当前播放列表
+  
+  if (!songs || !Array.isArray(songs) || songs.length === 0) {
+    console.warn('无效的歌曲列表:', songs)
+    return
+  }
+  
+  try {
+    // 使用 nextTick 确保 DOM 更新的正确顺序
+    await nextTick()
+    
+    // 先清空播放列表，等待一个 tick
     playlist.value = []
-    // 添加所有歌曲到播放列表
+    await nextTick()
+    
+    // 然后设置新的播放列表和当前歌曲
     playlist.value = [...songs]
     playlistIndex.value = 0
-    // 播放第一首歌
     currentSong.value = songs[0]
+    
     console.log('已添加', songs.length, '首歌曲到播放列表')
+  } catch (error) {
+    console.error('处理播放所有歌曲时出错:', error)
   }
 }
 
@@ -971,8 +990,9 @@ function performMemoryCleanup() {
     <!-- 全局音乐播放器 -->
     <Transition name="player-slide">
       <MusicPlayer 
-        v-if="currentSong"
+        v-if="currentSong && typeof currentSong === 'object' && Array.isArray(playlist)"
         ref="musicPlayerRef"
+        :key="currentSong.hash || 'default'"
         :song="currentSong"
         :playlist="playlist"
         @previous="handlePrevious"
