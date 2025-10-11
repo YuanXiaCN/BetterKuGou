@@ -1,4 +1,4 @@
-# BetterKuGou 0.1.3-alpha-pre1 更新日志
+# BetterKuGou 0.1.3-alpha-pre2 更新日志
 
 ## 修复
 - 切歌卡顿
