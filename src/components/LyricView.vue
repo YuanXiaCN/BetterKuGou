@@ -97,6 +97,21 @@
                 <path d="M176 474h672q8 0 8 8v60q0 8-8 8H176q-8 0-8-8v-60q0-8 8-8z"/>
               </svg>
             </button>
+
+            <!-- 翻译切换按钮 -->
+            <button 
+              v-if="hasTranslation" 
+              class="control-btn translation-btn" 
+              :class="{ active: showTranslation }" 
+              @click="toggleTranslation" 
+              title="显示翻译"
+            >
+              <svg viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor">
+                <path d="M140 188h584v164h92V144c0-17.7-14.3-32-32-32H96c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h232v-92H140V188z"/>
+                <path d="M414.3 256h-60.6c-3.4 0-6.4 2.2-7.6 5.4L219 629.4c-.3.8-.4 1.7-.4 2.6 0 4.4 3.6 8 8 8h55.1c3.4 0 6.4-2.2 7.6-5.4L322 540h196.2l32.7 94.6c1.3 3.2 4.3 5.4 7.6 5.4H614c4.4 0 8-3.6 8-8 0-.9-.1-1.8-.4-2.6L494.3 261.4c-1.3-3.2-4.3-5.4-7.6-5.4zM353.7 447L420 277.7 486.3 447H353.7z"/>
+                <path d="M936 528H800v-93c0-4.4-3.6-8-8-8h-56c-4.4 0-8 3.6-8 8v93H592c-13.3 0-24 10.7-24 24v176c0 13.3 10.7 24 24 24h136v152c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8V752h136c13.3 0 24-10.7 24-24V552c0-13.3-10.7-24-24-24zM888 704H728V576h160v128z"/>
+              </svg>
+            </button>
           </div>
         </div>
       </div>
@@ -113,54 +128,66 @@
             :class="{ 
               'current': index === currentLyricIndex,
               'played': index < currentLyricIndex,
-              'upcoming': index > currentLyricIndex
+              'upcoming': index > currentLyricIndex,
+              'has-translation': showTranslation && line.translation
             }"
             :style="getLyricLineStyle(index)"
             :ref="el => { if (el) lyricLineRefs[index] = el }"
           >
-            <!-- 渲染歌词内容 -->
-            <template v-if="line.words && line.words.length > 0">
-              <template v-for="(word, wordIndex) in line.words" :key="wordIndex">
-                <template v-for="(char, charIdx) in word.word.split('')" :key="`${wordIndex}-${charIdx}`">
+            <!-- 主要歌词（原文） -->
+            <div class="main-lyric">
+              <!-- 渲染歌词内容 -->
+              <template v-if="line.words && line.words.length > 0">
+                <template v-for="(word, wordIndex) in line.words" :key="wordIndex">
+                  <template v-for="(char, charIdx) in word.word.split('')" :key="`${wordIndex}-${charIdx}`">
+                    <span 
+                      v-if="char === ' '"
+                      class="lyric-word karaoke-char is-space"
+                      :data-word-index="wordIndex"
+                      :data-line-index="index"
+                      :data-start="word.startTime"
+                      :data-end="word.endTime"
+                      :data-line-start="line.time"
+                      :style="{ display: 'inline-block', width: '0.25em', minWidth: '0.25em' }"
+                    >&#8203;</span>
+                    <span 
+                      v-else
+                      class="lyric-word karaoke-char"
+                      :data-word-index="wordIndex"
+                      :data-line-index="index"
+                      :data-start="word.startTime"
+                      :data-end="word.endTime"
+                      :data-line-start="line.time"
+                    >{{ char }}</span>
+                  </template>
+                </template>
+              </template>
+              <template v-else>
+                <template v-for="(char, charIndex) in line.text" :key="charIndex">
                   <span 
                     v-if="char === ' '"
-                    class="lyric-word karaoke-char is-space"
-                    :data-word-index="wordIndex"
+                    class="lyric-char karaoke-char is-space"
+                    :data-char-index="charIndex"
                     :data-line-index="index"
-                    :data-start="word.startTime"
-                    :data-end="word.endTime"
-                    :data-line-start="line.time"
                     :style="{ display: 'inline-block', width: '0.25em', minWidth: '0.25em' }"
                   >&#8203;</span>
                   <span 
                     v-else
-                    class="lyric-word karaoke-char"
-                    :data-word-index="wordIndex"
+                    class="lyric-char karaoke-char"
+                    :data-char-index="charIndex"
                     :data-line-index="index"
-                    :data-start="word.startTime"
-                    :data-end="word.endTime"
-                    :data-line-start="line.time"
                   >{{ char }}</span>
                 </template>
               </template>
-            </template>
-            <template v-else>
-              <template v-for="(char, charIndex) in line.text" :key="charIndex">
-                <span 
-                  v-if="char === ' '"
-                  class="lyric-char karaoke-char is-space"
-                  :data-char-index="charIndex"
-                  :data-line-index="index"
-                  :style="{ display: 'inline-block', width: '0.25em', minWidth: '0.25em' }"
-                >&#8203;</span>
-                <span 
-                  v-else
-                  class="lyric-char karaoke-char"
-                  :data-char-index="charIndex"
-                  :data-line-index="index"
-                >{{ char }}</span>
-              </template>
-            </template>
+            </div>
+            
+            <!-- 翻译歌词 -->
+            <div 
+              v-if="showTranslation && line.translation" 
+              class="translation-lyric"
+            >
+              {{ line.translation }}
+            </div>
           </div>
 
           <!-- 桥段进度条（覆盖在正在播放的歌词位置） -->
@@ -189,6 +216,8 @@
 </template>
 
 <script>
+import { useSettingsStore } from '../stores/settingsStore.js'
+
 export default {
   name: 'LyricView',
   props: {
@@ -203,6 +232,10 @@ export default {
     lyrics: {
       type: String,
       default: ''
+    },
+    lyricData: {
+      type: Object,
+      default: null
     },
     currentPlayTime: {
       type: Number,
@@ -223,6 +256,16 @@ export default {
     isFavorite: {
       type: Boolean,
       default: false
+    },
+    pauseUpdates: {
+      type: Boolean,
+      default: false
+    }
+  },
+  setup() {
+    const settingsStore = useSettingsStore()
+    return {
+      settingsStore
     }
   },
   data() {
@@ -248,7 +291,12 @@ export default {
       // 桥段进度条
       bridgeInfo: null, // { startTime, duration, startLyricIndex } - 当前桥段信息
       isBridgeActive: false, // 是否正在显示桥段进度条
-      bridgeProgress: 0 // 桥段进度 0-100
+      bridgeProgress: 0, // 桥段进度 0-100
+      // 翻译相关
+      hasTranslation: false, // 是否有翻译
+      translationData: null, // 翻译数据
+      showTranslation: false, // 是否显示翻译（会根据设置和检测结果动态设置）
+      isNonChinese: false // 是否为非中文歌曲
     }
   },
   computed: {
@@ -360,39 +408,88 @@ export default {
       if (newVal) {
         this.startTimeClock()
         this.startSpectrum()
+        this.startUpdateLoop() // 启动RAF循环
         document.body.style.overflow = 'hidden'
       } else {
         this.stopTimeClock()
         this.stopSpectrum()
+        this.stopUpdateLoop() // 立即停止RAF循环，释放资源
         document.body.style.overflow = ''
+        // 清理缓存，避免内存泄漏
+        this.styleCache.clear()
+        this.lastProgressValues.clear()
       }
     },
     lyrics: {
       immediate: true,
       handler(newLyrics) {
-        this.parseLyrics(newLyrics)
+        this.parseLyrics(newLyrics, this.lyricData)
+      }
+    },
+    lyricData: {
+      immediate: true,
+      handler(newData) {
+        // 当歌词数据变化时重新解析
+        if (this.lyrics) {
+          this.parseLyrics(this.lyrics, newData)
+        }
       }
     },
     isPlaying() {
       this.startSpectrum()
+    },
+    pauseUpdates(newVal) {
+      if (newVal) {
+        // 暂停更新时立即停止RAF循环
+        this.stopUpdateLoop()
+        if (process.env.NODE_ENV === 'development') {
+          console.debug('🔄 歌词更新已暂停 - 切歌进行中')
+        }
+      } else {
+        // 恢复更新时重新启动RAF循环
+        this.startUpdateLoop()
+        if (process.env.NODE_ENV === 'development') {
+          console.debug('✅ 歌词更新已恢复 - 切歌完成')
+        }
+      }
     }
   },
   beforeUnmount() {
+    if (process.env.NODE_ENV === 'development') {
+      console.debug('🔄 LyricView 组件即将卸载，清理所有资源')
+    }
     this.stopTimeClock()
     this.stopSpectrum()
     this.stopUpdateLoop()
     if (this.rafId) {
       cancelAnimationFrame(this.rafId)
     }
+    // 清理所有缓存
+    this.styleCache.clear()
+    this.lastProgressValues.clear()
+    this.lyricLineRefs = {}
     document.body.style.overflow = ''
   },
   mounted() {
+    if (process.env.NODE_ENV === 'development') {
+      console.debug('🎵 LyricView 组件已挂载')
+    }
     // 启动持续的 RAF 更新循环
     this.startUpdateLoop()
   },
   methods: {
     // RAF 驱动的持续更新循环（60fps）
     updateLoop() {
+      // 检查组件是否仍然可见，如果不可见或者被暂停则完全停止循环
+      if (!this.visible || this.pauseUpdates) {
+        if (process.env.NODE_ENV === 'development') {
+          console.debug('🛑 歌词更新循环已暂停 - visible:', this.visible, 'pauseUpdates:', this.pauseUpdates, 'rafId:', this.updateLoopRafId)
+        }
+        // 关键修复：确保当前RAF ID被清除，避免重复调用
+        this.updateLoopRafId = null
+        return
+      }
+      
       // 同步父组件传入的时间
       this.internalPlayTime = this.currentPlayTime
       
@@ -420,18 +517,39 @@ export default {
       
       // 持续循环
       this.updateLoopRafId = requestAnimationFrame(this.updateLoop)
+      
+      // 额外的性能监控：RAF调用计数
+      if (process.env.NODE_ENV === 'development') {
+        if (!window._lyricRafCount) {
+          window._lyricRafCount = 0
+        }
+        window._lyricRafCount++
+      }
     },
     
     // 启动更新循环
     startUpdateLoop() {
-      if (!this.updateLoopRafId) {
+      // 首先停止任何现有的循环，避免重复
+      this.stopUpdateLoop()
+      
+      if (this.visible && !this.pauseUpdates) {
+        if (process.env.NODE_ENV === 'development') {
+          console.debug('✅ 启动歌词更新循环 - visible:', this.visible, 'pauseUpdates:', this.pauseUpdates)
+        }
         this.updateLoopRafId = requestAnimationFrame(this.updateLoop)
+      } else {
+        if (process.env.NODE_ENV === 'development') {
+          console.debug('⏸️ 跳过启动歌词更新循环 - visible:', this.visible, 'pauseUpdates:', this.pauseUpdates)
+        }
       }
     },
     
     // 停止更新循环
     stopUpdateLoop() {
       if (this.updateLoopRafId) {
+        if (process.env.NODE_ENV === 'development') {
+          console.debug('🛑 停止歌词更新循环 - rafId:', this.updateLoopRafId)
+        }
         cancelAnimationFrame(this.updateLoopRafId)
         this.updateLoopRafId = null
       }
@@ -568,7 +686,8 @@ export default {
       }
 
       // 计算垂直位置（相对于屏幕中心）
-      const lineHeight = 80 // 每行高度
+      const hasTranslation = this.showTranslation && this.parsedLyrics[index]?.translation
+      const lineHeight = hasTranslation ? 140 : 80 // 有翻译时每行高度增加更多以防重叠
       let translateY = 0
       
       if (index === this.currentLyricIndex) {
@@ -649,7 +768,21 @@ export default {
     // 获取歌曲名称
     getSongName(song) {
       if (!song) return '未知歌曲'
-      return song.name || song.songname || song.audio_name || song.filename || '未知歌曲'
+      // 取可用的原始标题
+      const raw = (song.name || song.songname || song.audio_name || song.filename || '').toString()
+
+      if (!raw) return '未知歌曲'
+
+      // 常见格式："歌手 - 歌名"，也可能使用不同的破折号
+      // 如果包含分隔符，则优先取最后一段作为歌名，避免将歌手名带入标题
+      const parts = raw.split(/\s[-—–]\s/)
+      let title = parts.length >= 2 ? parts[parts.length - 1].trim() : raw.trim()
+
+      // 去掉常见音频扩展名
+      title = title.replace(/\.(mp3|flac|wav|m4a|aac)$/i, '')
+
+      // 兜底
+      return title || '未知歌曲'
     },
     
     // 获取歌手名称
@@ -679,8 +812,12 @@ export default {
       }
       
       // 从 name 字段提取(格式: "歌手 - 歌名")
-      if (song.name && song.name.includes(' - ')) {
-        return song.name.split(' - ')[0]
+      if (song.name) {
+        // 兼容不同破折号：半角/全角/短横/长横
+        const match = song.name.split(/\s[-—–]\s/)
+        if (match.length >= 2) {
+          return match[0].trim()
+        }
       }
       
       return '未知歌手'
@@ -721,10 +858,197 @@ export default {
       })
     },
 
+    // 解析翻译数据（从language字段）
+    parseTranslationData(languageField) {
+      try {
+        console.log('开始解析翻译数据:', languageField)
+        
+        if (!languageField) {
+          console.log('没有language字段')
+          return null
+        }
+
+        // 解码Base64字符串
+        let decodedData
+        try {
+          decodedData = atob(languageField)
+          console.log('Base64解码成功:', decodedData.substring(0, 200))
+        } catch (e) {
+          console.log('Base64解码失败，尝试直接解析JSON:', e)
+          decodedData = languageField
+        }
+
+        // 解析JSON
+        const translationObj = JSON.parse(decodedData)
+        console.log('翻译数据解析成功:', translationObj)
+
+        if (!translationObj.content || !Array.isArray(translationObj.content)) {
+          console.log('翻译数据格式不正确')
+          return null
+        }
+
+        // 提取原文和翻译
+        let originalContent = null
+        let translationContent = null
+
+        translationObj.content.forEach(item => {
+          if (item.type === 0) {
+            // 原文（发音）
+            originalContent = item.lyricContent
+          } else if (item.type === 1) {
+            // 翻译
+            translationContent = item.lyricContent
+          }
+        })
+
+        console.log('原文内容:', originalContent)
+        console.log('翻译内容:', translationContent)
+        
+        // 输出翻译内容的前几行用于调试
+        if (translationContent && Array.isArray(translationContent)) {
+          console.log('=== 翻译数据详细信息 ===')
+          console.log(`翻译总行数: ${translationContent.length}`)
+          translationContent.slice(0, 5).forEach((item, index) => {
+            console.log(`翻译第${index + 1}行:`, item)
+          })
+          console.log('=======================')
+        }
+
+        return {
+          original: originalContent,
+          translation: translationContent,
+          version: translationObj.version
+        }
+      } catch (error) {
+        console.error('解析翻译数据失败:', error)
+        return null
+      }
+    },
+
+    // 检测歌曲是否为非中文
+    detectNonChineseSong(songData, lyricsData) {
+      try {
+        // 方法1：检查歌曲信息中的语言标识
+        if (songData) {
+          const songName = this.getSongName(songData)
+          const artistName = this.getSingerNames(songData)
+          
+          // 检查歌名和歌手名是否包含非中文字符
+          const hasChinese = /[\u4e00-\u9fff]/.test(songName + artistName)
+          const hasJapanese = /[\u3040-\u309f\u30a0-\u30ff]/.test(songName + artistName)
+          const hasKorean = /[\uac00-\ud7af]/.test(songName + artistName)
+          const hasEnglish = /[a-zA-Z]/.test(songName + artistName)
+          
+          console.log('语言检测结果:', { 
+            songName, 
+            artistName, 
+            hasChinese, 
+            hasJapanese, 
+            hasKorean, 
+            hasEnglish 
+          })
+          
+          // 如果有日文、韩文，或者英文但没有中文，认为是非中文歌曲
+          if (hasJapanese || hasKorean || (hasEnglish && !hasChinese)) {
+            return true
+          }
+        }
+
+        // 方法2：检查歌词内容
+        if (lyricsData && typeof lyricsData === 'string') {
+          const lyricsText = lyricsData.substring(0, 1000) // 取前1000字符检测
+          const chineseCharCount = (lyricsText.match(/[\u4e00-\u9fff]/g) || []).length
+          const totalCharCount = lyricsText.replace(/[^\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7afa-zA-Z]/g, '').length
+          
+          if (totalCharCount > 0) {
+            const chineseRatio = chineseCharCount / totalCharCount
+            console.log('歌词中文比例:', chineseRatio, '中文字符:', chineseCharCount, '总字符:', totalCharCount)
+            
+            // 如果中文字符比例小于30%，认为是非中文歌曲
+            return chineseRatio < 0.3
+          }
+        }
+
+        return false
+      } catch (error) {
+        console.error('检测歌曲语言失败:', error)
+        return false
+      }
+    },
+
     // 解析歌词
-    parseLyrics(lrcContent) {
+    parseLyrics(lrcContent, rawLyricData = null) {
       console.log('解析歌词，内容长度:', lrcContent?.length)
       console.log('歌词内容预览:', lrcContent?.substring(0, 200))
+      console.log('原始歌词数据:', rawLyricData)
+      
+      // 重置翻译相关状态
+      this.hasTranslation = false
+      this.translationData = null
+      this.isNonChinese = false
+      this.showTranslation = false
+
+      // 检测是否为非中文歌曲
+      this.isNonChinese = this.detectNonChineseSong(this.song, lrcContent)
+      console.log('是否为非中文歌曲:', this.isNonChinese)
+
+      // 详细检查原始歌词数据结构
+      console.log('🔍 检查原始歌词数据结构:')
+      console.log('  rawLyricData 是否存在:', !!rawLyricData)
+      console.log('  rawLyricData 类型:', typeof rawLyricData)
+      if (rawLyricData) {
+        console.log('  rawLyricData 所有键:', Object.keys(rawLyricData))
+        console.log('  rawLyricData.language 是否存在:', 'language' in rawLyricData)
+        console.log('  rawLyricData 完整内容:', rawLyricData)
+        
+        // 检查是否有其他可能包含翻译的字段
+        const possibleFields = ['trans', 'translation', 'lang', 'multilang', 'lyric_translation', 'lyricTranslation', 'translationData']
+        possibleFields.forEach(field => {
+          if (rawLyricData[field]) {
+            console.log(`  🔍 发现可能的翻译字段 ${field}:`, rawLyricData[field])
+          }
+        })
+      }
+
+      // 尝试解析翻译数据 - 检查多个可能的数据源
+      let languageField = null
+      
+      // 方法1：直接从rawLyricData.language获取
+      if (rawLyricData && rawLyricData.language) {
+        languageField = rawLyricData.language
+        console.log('✅ 从rawLyricData.language获取到翻译数据')
+      }
+      
+      // 方法2：从decodeContent中的[language:...]标签提取
+      if (!languageField && lrcContent) {
+        const languageMatch = lrcContent.match(/\[language:(.*?)\]/s)
+        if (languageMatch && languageMatch[1]) {
+          languageField = languageMatch[1]
+          console.log('✅ 从歌词内容的[language:...]标签中提取到翻译数据')
+        }
+      }
+      
+      // 开始解析翻译数据
+      if (languageField) {
+        console.log('🔍 开始解析翻译数据，数据长度:', languageField.length)
+        this.translationData = this.parseTranslationData(languageField)
+        if (this.translationData) {
+          this.hasTranslation = true
+          // 根据用户设置和歌曲类型决定是否显示翻译
+          const userSetting = this.settingsStore.settings?.playback?.showTranslation ?? true // 默认显示翻译
+          // 临时强制显示翻译用于测试
+          this.showTranslation = userSetting // 暂时不考虑语言检测，直接显示翻译
+          console.log('✅ 成功解析翻译数据')
+          console.log('  - 翻译版本:', this.translationData.version)
+          console.log('  - 是否为非中文歌曲:', this.isNonChinese)
+          console.log('  - 用户设置显示翻译:', userSetting)
+          console.log('  - 最终显示翻译:', this.showTranslation)
+        } else {
+          console.log('❌ 翻译数据存在但解析失败')
+        }
+      } else {
+        console.log('❌ 没有找到翻译数据')
+      }
       
       if (!lrcContent) {
         this.parsedLyrics = [{ time: 0, text: '暂无歌词' }]
@@ -816,6 +1140,54 @@ export default {
       
       console.log('歌词解析完成，共', this.parsedLyrics.length, '行')
       console.log('前3行歌词:', this.parsedLyrics.slice(0, 3))
+
+      // 处理翻译映射
+      if (this.hasTranslation && this.translationData) {
+        this.mapTranslationToLyrics()
+      }
+    },
+
+    // 将翻译数据映射到歌词行
+    mapTranslationToLyrics() {
+      try {
+        const { translation } = this.translationData
+        if (!translation || !Array.isArray(translation)) {
+          console.log('翻译数据格式不正确')
+          return
+        }
+
+        console.log('开始映射翻译到歌词行，翻译行数:', translation.length, '歌词行数:', this.parsedLyrics.length)
+
+        // 为每行歌词添加翻译
+        this.parsedLyrics.forEach((lyricLine, index) => {
+          if (index < translation.length && translation[index] && translation[index][0]) {
+            lyricLine.translation = translation[index][0].trim()
+            console.log(`第${index}行添加翻译:`, lyricLine.text, '->', lyricLine.translation)
+          }
+        })
+
+        console.log('翻译映射完成')
+        
+        // 输出前五句歌词的翻译用于调试
+        console.log('=== 前五句歌词翻译预览 ===')
+        this.parsedLyrics.slice(0, 5).forEach((line, index) => {
+          console.log(`第${index + 1}句:`)
+          console.log(`  原文: ${line.text}`)
+          console.log(`  翻译: ${line.translation || '(无翻译)'}`)
+          console.log(`  时间: ${line.time.toFixed(2)}s`)
+          console.log('---')
+        })
+        console.log('=========================')
+        
+        // 检查当前翻译显示状态
+        console.log('🔍 当前翻译显示状态:')
+        console.log('  - hasTranslation:', this.hasTranslation)
+        console.log('  - showTranslation:', this.showTranslation)
+        console.log('  - 有翻译的歌词行数:', this.parsedLyrics.filter(line => line.translation).length)
+        
+      } catch (error) {
+        console.error('翻译映射失败:', error)
+      }
     },
 
     // 解析KRC格式的逐字时间信息
@@ -1360,6 +1732,39 @@ export default {
       this.$emit('toggle-favorite')
     },
 
+    // 切换翻译显示
+    toggleTranslation() {
+      if (!this.hasTranslation) return
+      
+      this.showTranslation = !this.showTranslation
+      console.log('切换翻译显示:', this.showTranslation)
+      
+      // 输出当前状态用于调试
+      console.log('🎵 翻译切换后状态:')
+      console.log('  - hasTranslation:', this.hasTranslation)
+      console.log('  - showTranslation:', this.showTranslation)
+      console.log('  - 当前歌词索引:', this.currentLyricIndex)
+      if (this.parsedLyrics[this.currentLyricIndex]) {
+        const currentLine = this.parsedLyrics[this.currentLyricIndex]
+        console.log('  - 当前行原文:', currentLine.text)
+        console.log('  - 当前行翻译:', currentLine.translation || '(无翻译)')
+      }
+      
+      // 更新用户设置
+      try {
+        if (this.settingsStore && this.settingsStore.updateSettings) {
+          this.settingsStore.updateSettings({
+            playback: {
+              ...this.settingsStore.settings?.playback,
+              showTranslation: this.showTranslation
+            }
+          })
+        }
+      } catch (error) {
+        console.warn('更新翻译设置失败:', error)
+      }
+    },
+
     // 处理进度条点击事件
     handleProgressClick(event) {
       const progressBar = event.currentTarget
@@ -1515,12 +1920,26 @@ export default {
   font-weight: 600;
   margin: 0 0 12px 0;
   color: white;
+  /* 避免超长歌名撑破布局，支持两行显示并省略 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
+  line-height: 1.25;
+  max-height: calc(1.25em * 2);
 }
 
 .song-artist {
   font-size: 18px;
   margin: 0;
   color: rgba(255, 255, 255, 0.7);
+  /* 单行省略，过长时不换行 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 频谱进度条 */
@@ -1673,8 +2092,14 @@ export default {
   overflow: visible;
   color: rgba(255, 255, 255, 0.8);
   font-size: 1.2em; /* 调大基础字体 */
-  line-height: 1.5; /* 增加行高，让字体有更好的呼吸感 */
+  line-height: 1.2; /* 紧凑行高防止重叠 */
   /* position, transform, transition 等由 getLyricLineStyle 动态控制 */
+}
+
+/* 有翻译的歌词行需要更紧凑 */
+.lyric-line.has-translation {
+  line-height: 1.1;
+  padding: 8px 20px; /* 增加上下内边距 */
 }
 
 /* 正在播放的歌词 */
@@ -1691,6 +2116,70 @@ export default {
 /* 未播放的歌词 */
 .lyric-line.upcoming {
   color: rgba(255, 255, 255, 0.7);
+}
+
+/* 双语歌词支持 */
+.lyric-line.has-translation {
+  white-space: normal; /* 允许换行 */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px; /* 减少间距 */
+  /* 确保不会重叠 */
+  z-index: 1;
+  position: relative;
+  min-height: 60px; /* 设置最小高度确保不重叠 */
+}
+
+.main-lyric {
+  font-size: inherit;
+  font-weight: inherit;
+  margin: 0;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.translation-lyric {
+  font-size: 0.6em; /* 翻译字体更小 */
+  opacity: 0.75;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 300;
+  line-height: 1.0;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+  text-align: center;
+  margin: 2px 0 0 0; /* 只保留顶部间距 */
+  padding: 0; /* 移除内边距 */
+  max-width: 90%;
+  word-wrap: break-word;
+  /* 确保翻译不会影响布局 */
+  flex-shrink: 0;
+}
+
+/* 翻译按钮样式 */
+.translation-btn {
+  position: relative;
+}
+
+.translation-btn.active {
+  color: #feca57 !important;
+  background: rgba(254, 202, 87, 0.15);
+}
+
+.translation-btn::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 2px;
+  background: #feca57;
+  transition: width 0.3s ease;
+}
+
+.translation-btn.active::after {
+  width: 80%;
 }
 
 /* 正在播放的歌词行样式 */

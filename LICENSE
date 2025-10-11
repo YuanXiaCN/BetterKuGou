@@ -1,25 +1,25 @@
-Copyright Notice / °æÈ¨ÓëÊ¹ÓÃÉùÃ÷
+Copyright Notice / ç‰ˆæƒä¸ä½¿ç”¨å£°æ˜
 
 English:
-- This project (MusicApp) is licensed under MIT License, Copyright ? 2024 ğ°ÏÄ.  
+- This project (MusicApp) is licensed under MIT License, Copyright ? 2024 é¸¢å¤.  
 - It bundles KuGouMusicAPI, MIT ? 2023 MakcRe.  
 - Provided strictly for educational purposes. You must delete it within 24 hours after download.  
   The authors assume no liability for any misuse.
 
-ÖĞÎÄ£º
-- ±¾Èí¼ş£¨MusicApp£©°æÈ¨¹é ğ°ÏÄËùÓĞ£¬ÒÔ MIT Ğí¿ÉÖ¤·¢²¼¡£  
-- ÄÚÖÃ KuGouMusicAPI£¬°æÈ¨¹é MakcRe ËùÓĞ£¬Í¬ÑùÎª MIT Ğí¿ÉÖ¤¡£  
-- ½öÏŞÑ§Ï°½»Á÷£¬½ûÖ¹ÉÌÓÃ£»ÏÂÔØºóÇëÓÚ 24 Ğ¡Ê±ÄÚÉ¾³ı¡£Î¥ÕßÔğÈÎ×Ô¸º¡£
+ä¸­æ–‡ï¼š
+- æœ¬è½¯ä»¶ï¼ˆMusicAppï¼‰ç‰ˆæƒå½’ é¸¢å¤æ‰€æœ‰ï¼Œä»¥ MIT è®¸å¯è¯å‘å¸ƒã€‚  
+- å†…ç½® KuGouMusicAPIï¼Œç‰ˆæƒå½’ MakcRe æ‰€æœ‰ï¼ŒåŒæ ·ä¸º MIT è®¸å¯è¯ã€‚  
+- ä»…é™å­¦ä¹ äº¤æµï¼Œç¦æ­¢å•†ç”¨ï¼›ä¸‹è½½åè¯·äº 24 å°æ—¶å†…åˆ é™¤ã€‚è¿è€…è´£ä»»è‡ªè´Ÿã€‚
 
-¼¼Êõ£ºVue Vite Electron Node.JS KuGouMusicAPI ¿á¹·ÒôÀÖ
+æŠ€æœ¯ï¼šVue Vite Electron Node.JS KuGouMusicAPI é…·ç‹—éŸ³ä¹
 
-±¾Èí¼şÍêÈ«Ãâ·Ñ
-Çë×ğÖØ°æÈ¨ Ö§³ÖÕı°æ
-ÒôÆµÊı¾İ±¾Éí¿ÉÄÜÊÜ¶ÀÁ¢°æÈ¨±£»¤£¬ÇëÁíĞĞÈ¡µÃÈ¨Àû·½ÊÚ
+æœ¬è½¯ä»¶å®Œå…¨å…è´¹
+è¯·å°Šé‡ç‰ˆæƒ æ”¯æŒæ­£ç‰ˆ
+éŸ³é¢‘æ•°æ®æœ¬èº«å¯èƒ½å—ç‹¬ç«‹ç‰ˆæƒä¿æŠ¤ï¼Œè¯·å¦è¡Œå–å¾—æƒåˆ©æ–¹æˆ
 
 MIT License
 
-Copyright (c) 2025 ğ°ÏÄ
+Copyright (c) 2025 é¸¢å¤
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

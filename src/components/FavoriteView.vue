@@ -68,8 +68,12 @@
           </div>
         </div>
 
-        <div class="col-artist">{{ getSingerNames(song.singerinfo, song) || song.singername || song.author_name || (song.name && song.name.includes(' - ') ? song.name.split(' - ')[0] : '-') }}</div>
-        <div class="col-album">{{ song.albuminfo?.name || song.remark || '-' }}</div>
+        <div class="col-artist">
+          <span class="artist-link" @click.stop="goArtist(song)">
+            {{ getSingerNames(song.singerinfo, song) || song.singername || song.author_name || (song.name && song.name.includes(' - ') ? song.name.split(' - ')[0] : '-') }}
+          </span>
+        </div>
+  <div class="col-album"><span class="album-link" @click.stop="goAlbum(song)">{{ song.albuminfo?.name || song.remark || '-' }}</span></div>
         <div class="col-duration">
           {{ formatDuration(song.timelen) }}
           <div class="action-buttons">
@@ -249,7 +253,9 @@ export default {
       })
       // 强制触发一次重新渲染检查
       this.$nextTick(() => {
-        console.log('🔄 [FavoriteView] 下一个tick，强制检查高亮状态')
+        if (process.env.NODE_ENV === 'development') {
+          console.log('🔄 [FavoriteView] 下一个tick，强制检查高亮状态')
+        }
         // 检查当前播放歌曲是否在收藏列表中
         if (this.favoriteList.length > 0) {
           this.checkCurrentSongInFavorites()
@@ -258,42 +264,17 @@ export default {
     })
   },
   methods: {
-    // 检查是否为当前播放歌曲
+    // 检查是否为当前播放歌曲（优化版本）
     isCurrentlyPlaying(song) {
-      // 只在找到匹配时或第一首和最后一首歌时输出详细日志
-      const shouldLog = this.favoriteList.indexOf(song) === 0 || 
-                       this.favoriteList.indexOf(song) === this.favoriteList.length - 1 ||
-                       (this.currentPlayingHash && this.currentPlayingHash === song.hash) ||
-                       (this.currentSong && this.currentSong.hash === song.hash)
+      if (!song || !song.hash) return false
       
-      if (shouldLog) {
-        console.log('[FavoriteView] isCurrentlyPlaying 检查:')
-        console.log('  - 歌曲名:', song.name)
-        console.log('  - 歌曲hash:', song.hash)
-        console.log('  - currentPlayingHash:', this.currentPlayingHash)
-        console.log('  - currentSong:', this.currentSong?.name)
-        console.log('  - currentSong.hash:', this.currentSong?.hash)
-        console.log('  - 收藏列表总数:', this.favoriteList.length)
-        console.log('  - 当前歌曲在列表中的索引:', this.favoriteList.indexOf(song))
-      }
-      
-      // 检查多种匹配方式
-      const hashMatch = this.currentPlayingHash && this.currentPlayingHash === song.hash
-      const songMatch = this.currentSong && this.currentSong.hash === song.hash
-      
-      if (shouldLog) {
-        console.log('  - hash匹配:', hashMatch)
-        console.log('  - song匹配:', songMatch)
-      }
-      
+      // 优化：直接检查hash匹配，避免重复计算和大量日志
+      const hashMatch = this.currentPlayingHash === song.hash
+      const songMatch = this.currentSong?.hash === song.hash
       const result = hashMatch || songMatch
       
-      if (shouldLog) {
-        console.log('  - 最终结果:', result ? '✅ 匹配' : '❌ 不匹配')
-      }
-      
-      // 如果匹配成功，输出一条醒目的日志
-      if (result) {
+      // 只在开发环境且找到匹配时输出日志
+      if (process.env.NODE_ENV === 'development' && result) {
         console.log('🎯 [FavoriteView] 找到匹配的歌曲!', song.name)
       }
       
@@ -307,35 +288,42 @@ export default {
         return
       }
       
-      console.log('🔍 [FavoriteView] 检查当前播放歌曲是否在收藏列表中:')
-      console.log('  - 当前播放:', this.currentSong.name)
-      console.log('  - Hash:', this.currentPlayingHash)
-      console.log('  - 收藏列表总数:', this.favoriteList.length)
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔍 [FavoriteView] 检查当前播放歌曲是否在收藏列表中:')
+        console.log('  - 当前播放:', this.currentSong.name)
+        console.log('  - Hash:', this.currentPlayingHash)
+        console.log('  - 收藏列表总数:', this.favoriteList.length)
+      }
       
-      // 按Hash查找
+      // 按Hash查找（优化：使用缓存和更高效的查找）
       const foundByHash = this.favoriteList.find(song => song.hash === this.currentPlayingHash)
       if (foundByHash) {
-        console.log('  - ✅ 通过Hash找到:', foundByHash.name)
+        if (process.env.NODE_ENV === 'development') {
+          console.log('  - ✅ 通过Hash找到:', foundByHash.name)
+        }
         return foundByHash
       }
       
-      // 按歌曲名查找（模糊匹配）
-      const currentName = this.currentSong.name.toLowerCase()
-      const foundByName = this.favoriteList.find(song => {
-        return song.name && song.name.toLowerCase().includes(currentName.split(' - ').pop())
-      })
-      
-      if (foundByName) {
-        console.log('  - 🔍 通过歌名找到可能匹配:', foundByName.name, 'Hash:', foundByHash.hash)
-      } else {
-        console.log('  - ❌ 在收藏列表中没有找到当前播放的歌曲')
-        console.log('  - 💡 这可能说明：')
-        console.log('    1. 歌曲确实不在收藏列表中')
-        console.log('    2. Hash不匹配（同一首歌的不同版本）')
-        console.log('    3. 收藏列表加载不完整')
+      // 按歌曲名查找（模糊匹配）- 简化逻辑
+      const currentName = this.currentSong.name?.toLowerCase()
+      if (currentName) {
+        const foundByName = this.favoriteList.find(song => {
+          return song.name && song.name.toLowerCase().includes(currentName.split(' - ').pop())
+        })
+        
+        if (foundByName) {
+          if (process.env.NODE_ENV === 'development') {
+            console.log('  - 🔍 通过歌名找到可能匹配:', foundByName.name, 'Hash:', foundByName.hash)
+          }
+          return foundByName
+        }
       }
       
-      return foundByHash || foundByName
+      if (process.env.NODE_ENV === 'development') {
+        console.log('  - ❌ 在收藏列表中没有找到当前播放的歌曲')
+      }
+      
+      return null
     },
     
     // 加载收藏列表
@@ -637,6 +625,52 @@ export default {
     goToDiscover() {
       this.$emit('navigate', 'home')
     },
+
+    // 进入歌手页面
+    goArtist(song) {
+      const id = this.getPrimaryArtistId(song)
+      const name = this.getPrimaryArtistName(song)
+      this.$emit('navigate', 'artist', { id, name })
+    },
+    // 进入专辑页面
+    goAlbum(song) {
+      const id =
+        song.album_id ||
+        song.albumid ||
+        song.AlbumID ||
+        song.base?.album_id ||
+        song.album_info?.album_id ||
+        song.album_info?.id ||
+        null
+      const name = song.albuminfo?.name || song.album_name || song.remark || song.album_info?.album_name || null
+      if (id || name) this.$emit('navigate', 'album', { id, name })
+    },
+
+    // 提取首个歌手ID
+    getPrimaryArtistId(song) {
+      const s = song || {}
+      if (s.SingerId || s.singerid || s.AuthorId || s.author_id) return s.SingerId || s.singerid || s.AuthorId || s.author_id
+      if (Array.isArray(s.singerinfo) && s.singerinfo.length) {
+        const first = s.singerinfo[0]
+        return first?.id || first?.singerid || first?.author_id || null
+      }
+      return null
+    },
+
+    // 提取首个歌手名
+    getPrimaryArtistName(song) {
+      const s = song || {}
+      if (s.SingerName || s.singername || s.author_name) return s.SingerName || s.singername || s.author_name
+      if (Array.isArray(s.singerinfo) && s.singerinfo.length) {
+        const first = s.singerinfo[0]
+        return first?.name || first?.singer_name || first?.singername || first?.author_name || null
+      }
+      // 从 "歌手 - 歌名" 中分离
+      if (typeof s.name === 'string' && s.name.includes(' - ')) {
+        return s.name.split(' - ')[0]
+      }
+      return null
+    },
     
     // 切换排序顺序
     toggleSortOrder() {
@@ -881,6 +915,11 @@ export default {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.artist-link { cursor: pointer; }
+.artist-link:hover { color: var(--color-primary); text-decoration: underline; }
+.album-link { cursor: pointer; }
+.album-link:hover { color: var(--color-primary); text-decoration: underline; }
 
 .col-duration {
   color: var(--color-text-tertiary);

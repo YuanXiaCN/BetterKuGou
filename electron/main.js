@@ -432,8 +432,10 @@ function createWindow() {
   updateLoadingProgress(75, '正在加载前端界面...', 'frontend')
   
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 1280,
+    height: 720,
+    minWidth: 1024,
+    minHeight: 480,
     frame: false,
     show: false, // 先不显示,等加载完成后再显示
     webPreferences: {

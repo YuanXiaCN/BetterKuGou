@@ -29,6 +29,7 @@
 <script>
 export default {
   name: 'ContextMenu',
+  emits: ['close'],
   props: {
     visible: {
       type: Boolean,
@@ -94,7 +95,7 @@ export default {
     },
     handleClickOutside(event) {
       // 如果点击的是菜单内部，不关闭
-      if (this.$el && this.$el.contains(event.target)) {
+      if (this.$refs.menu && event.target && this.$refs.menu.contains(event.target)) {
         return
       }
       this.$emit('close')

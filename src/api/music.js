@@ -238,3 +238,156 @@ export const getPlaylistTracks = (id, page = 1, pagesize = 100) => {
     params: { id, page, pagesize }
   })
 }
+
+/**
+ * 搜索音乐
+ * @param {string} keywords - 搜索关键词
+ * @param {number} page - 页码
+ * @param {number} pagesize - 每页数量
+ * @param {string} type - 搜索类型：song（单曲），album（专辑），author（歌手），special（歌单），lyric（歌词），mv（MV）
+ * @returns {Promise}
+ */
+export const searchMusic = (keywords, page = 1, pagesize = 30, type = 'song') => {
+  return apiClient.get('/search', {
+    params: { keywords, page, pagesize, type }
+  })
+}
+
+/**
+ * 综合搜索
+ * @param {string} keywords - 搜索关键词
+ * @param {number} page - 页码
+ * @param {number} pagesize - 每页数量
+ * @returns {Promise}
+ */
+export const searchComplex = (keywords, page = 1, pagesize = 30) => {
+  return apiClient.get('/search/complex', {
+    params: { keywords, page, pagesize }
+  })
+}
+
+/**
+ * 获取歌手详情
+ * @param {number|string} id 歌手ID
+ */
+export const getArtistDetail = (id) => {
+  return apiClient.get('/artist/detail', {
+    params: { id }
+  })
+}
+
+/**
+ * 获取歌手单曲（支持分页）
+ * @param {number|string} id 歌手ID
+ * @param {number} page 页码
+ * @param {number} pagesize 每页条数（默认30）
+ * @param {('hot'|'new')} sort 排序：hot 热门，new 最新
+ */
+export const getArtistAudios = (id, page = 1, pagesize = 30, sort = 'new') => {
+  return apiClient.get('/artist/audios', {
+    params: { id, page, pagesize, sort }
+  })
+}
+
+/**
+ * 获取歌手专辑（支持分页）
+ * @param {number|string} id 歌手ID
+ * @param {number} page 页码
+ * @param {number} pagesize 每页条数（默认30）
+ * @param {('hot'|'new')} sort 排序：hot 热门，new 最新
+ */
+export const getArtistAlbums = (id, page = 1, pagesize = 30, sort = 'new') => {
+  return apiClient.get('/artist/albums', {
+    params: { id, page, pagesize, sort }
+  })
+}
+
+/**
+ * 关注歌手（需要登录）
+ */
+export const followArtist = (id) => {
+  return apiClient.post('/artist/follow', null, {
+    params: { id }
+  })
+}
+
+/**
+ * 取消关注歌手（需要登录）
+ */
+export const unfollowArtist = (id) => {
+  return apiClient.post('/artist/unfollow', null, {
+    params: { id }
+  })
+}
+
+/**
+ * 根据名称查找歌手（用于从搜索结果或缺少ID时兜底）
+ */
+export const findArtistByName = async (name) => {
+  if (!name) return null
+  try {
+    const res = await apiClient.get('/search', { params: { keywords: name, type: 'author', pagesize: 5 } })
+    const list = res?.data?.lists || []
+    return list[0] || null
+  } catch (e) {
+    console.error('findArtistByName error:', e)
+    return null
+  }
+}
+
+/**
+ * 批量获取歌曲对应的歌手/专辑图片
+ * @param {string[]} hashes 歌曲hash数组
+ * @param {number} count 每个返回数量，默认1
+ */
+export const getImagesByHash = (hashes = [], count = 1) => {
+  if (!Array.isArray(hashes)) hashes = [hashes].filter(Boolean)
+  const hashParam = hashes.filter(Boolean).join(',')
+  if (!hashParam) return Promise.resolve({})
+  return apiClient.get('/images', {
+    params: { hash: hashParam, count }
+  })
+}
+
+/**
+ * 根据专辑ID批量获取专辑信息（含封面）
+ * @param {Array<string|number>} albumIds 专辑ID数组
+ * @param {string} fields 需要的字段，默认返回常用字段
+ */
+export const getAlbumInfo = (albumIds = [], fields = 'sizable_cover,cover,album_name,album_id') => {
+  if (!Array.isArray(albumIds)) albumIds = [albumIds].filter(Boolean)
+  const idParam = albumIds.filter(Boolean).join(',')
+  if (!idParam) return Promise.resolve({})
+  return apiClient.get('/album', {
+    params: {
+      album_id: idParam,
+      fields
+    }
+  })
+}
+
+/**
+ * 获取专辑详情
+ * @param {number|string} id 专辑ID
+ */
+export const getAlbumDetail = (id) => {
+  return apiClient.get('/album/detail', {
+    params: { id }
+  })
+}
+
+/**
+ * 获取专辑曲目列表
+ * @param {number|string} id 专辑ID
+ * @param {number} page 页码（部分接口可能不分页，这里预留）
+ * @param {number} pagesize 每页数量（预留）
+ */
+export const getAlbumSongs = (id, page = 1, pagesize = 30) => {
+  const token = localStorage.getItem('kugou_token') || ''
+  const userid = localStorage.getItem('kugou_userid') || ''
+  const params = { id, page, pagesize }
+  if (token && userid) {
+    params.cookie = `token=${encodeURIComponent(token)};userid=${encodeURIComponent(userid)}`
+  }
+  return apiClient.get('/album/songs', { params })
+}

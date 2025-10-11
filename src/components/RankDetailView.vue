@@ -67,8 +67,12 @@
           </div>
         </div>
 
-        <div class="col-artist">{{ song.author_name || song.singername || '未知歌手' }}</div>
-        <div class="col-album">{{ song.album_name || song.remark || '-' }}</div>
+        <div class="col-artist">
+          <span class="artist-link" @click.stop="goArtist(song)">{{ song.author_name || song.singername || '未知歌手' }}</span>
+        </div>
+        <div class="col-album">
+          <span class="album-link" @click.stop="goAlbum(song)">{{ song.album_name || song.remark || '-' }}</span>
+        </div>
         <div class="col-duration">
           {{ formatDuration(song.duration) }}
           <div class="action-buttons">
@@ -136,6 +140,24 @@ export default {
       } finally {
         this.loading = false
       }
+    },
+    goArtist(song) {
+      const id = song.AuthorId || song.author_id || song.SingerId || song.singerid || null
+      const name = song.author_name || song.singername || null
+      if (id || name) this.$emit('navigate', 'artist', { id, name })
+    },
+    goAlbum(song) {
+      const id =
+        song.album_id ||
+        song.albumid ||
+        song.AlbumID ||
+        song.base?.album_id ||
+        song.album?.id ||
+        song.album_info?.album_id ||
+        song.album_info?.id ||
+        null
+      const name = song.album_name || song.remark || song.album_info?.album_name || null
+      if (id || name) this.$emit('navigate', 'album', { id, name })
     },
     
     handleBack() {
@@ -449,6 +471,11 @@ export default {
   align-items: center;
   justify-content: space-between;
 }
+
+.artist-link { cursor: pointer; }
+.artist-link:hover { color: var(--color-primary); text-decoration: underline; }
+.album-link { cursor: pointer; }
+.album-link:hover { color: var(--color-primary); text-decoration: underline; }
 
 .action-buttons {
   display: flex;

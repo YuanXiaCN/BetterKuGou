@@ -1,5 +1,5 @@
 <template>
-  <div class="music-player" v-if="currentSong" :class="{ 'player-style-netease': playerStyle === 'netease' }">
+  <div class="music-player" :class="{ 'player-style-netease': playerStyle === 'netease' }">
     <!-- 默认样式：进度条在顶部 -->
     <div v-if="playerStyle !== 'netease'" class="progress-bar-container">
       <input 
@@ -15,7 +15,7 @@
     </div>
 
     <!-- 播放器主体 -->
-    <div class="player-main" :class="{ 'isPlaying': isPlaying }">
+    <div class="player-main" :class="{ 'isPlaying': isPlaying }" v-if="currentSong">
       <!-- 左侧：歌曲信息 -->
       <div class="song-info-section">
         <img 
@@ -204,11 +204,13 @@
         :visible="showLyricView"
         :song="currentSong"
         :lyrics="currentLyrics"
+        :lyric-data="currentLyricData"
         :current-play-time="currentTime"
         :duration="duration"
         :is-playing="isPlaying"
         :play-mode="playMode"
         :is-favorite="isFavorite"
+        :pause-updates="isSwitchingSong"
         @close="closeLyrics"
         @toggle-play="togglePlay"
         @previous="playPrevious"
@@ -302,10 +304,13 @@ export default {
       // 歌词相关
       showLyricView: false, // 是否显示歌词界面
       currentLyrics: '', // 当前歌词内容
+      currentLyricData: null, // 完整的歌词数据（包含翻译等信息）
       // MediaSession 相关
       lastPositionUpdate: null, // 上次位置更新的时间（秒）
       // 切歌控制
       isSwitchingSong: false, // 是否正在切歌（防止并发）
+      isLoadingSong: false, // 是否正在加载歌曲（防止重复加载）
+      isComponentReady: false, // 组件是否完全准备就绪
       switchSongDebounceTimer: null, // 切歌防抖定时器
       // RAF 循环
       rafId: null // requestAnimationFrame ID
@@ -350,16 +355,44 @@ export default {
         if (newSong) {
           // 如果新歌曲与当前播放的歌曲相同，不重新加载
           if (this.currentSong && this.currentSong.hash === newSong.hash) {
-            console.log('歌曲相同，跳过重复加载:', newSong.name || newSong.filename)
+            console.log('🎵 [外部Song] 歌曲相同，跳过重复加载:', newSong.name || newSong.filename)
             return
           }
           // 检查是否正在切歌中，避免冲突
           if (this.isSwitchingSong) {
-            console.log('正在切歌中，忽略外部 song prop 变化')
+            console.log('🎵 [外部Song] 正在切歌中，忽略外部 song prop 变化')
             return
           }
-          console.log('🎵 [外部Song] 外部传入新歌曲，加载:', newSong.name || newSong.filename)
-          this.currentSong = newSong
+          // 检查是否正在加载歌曲，避免重复加载
+          if (this.isLoadingSong) {
+            console.log('🎵 [外部Song] 正在加载歌曲中，忽略外部 song prop 变化')
+            return
+          }
+          
+          // 检查组件是否准备就绪
+          if (!this.isComponentReady) {
+            console.log('🎵 [外部Song] 组件尚未准备就绪，延迟加载歌曲:', newSong.name || newSong.filename)
+            // 等待组件准备就绪后重试
+            const checkReady = () => {
+              if (this.isComponentReady && this.$refs.audioPlayer) {
+                console.log('🎵 [外部Song] 组件已准备就绪，开始加载延迟的歌曲')
+                this.loadSong(newSong)
+              } else {
+                setTimeout(checkReady, 100)
+              }
+            }
+            checkReady()
+            return
+          }
+          
+          console.log('🎵 [外部Song] 外部传入新歌曲，加载:', newSong.name || newSong.filename, {
+            isSwitchingSong: this.isSwitchingSong,
+            isLoadingSong: this.isLoadingSong,
+            isComponentReady: this.isComponentReady,
+            currentSongHash: this.currentSong?.hash,
+            newSongHash: newSong.hash
+          })
+          // 不在这里设置 currentSong，让 loadSong 方法来处理
           this.loadSong(newSong)
         }
       },
@@ -374,33 +407,57 @@ export default {
             return
           }
           
-          console.log('播放列表更新:', newPlaylist.length, '首歌曲')
+          // 只在开发环境输出详细日志
+          if (process.env.NODE_ENV === 'development') {
+            console.log('播放列表更新:', newPlaylist.length, '首歌曲')
+          }
           
           // 如果播放列表被完全清空，重置相关状态
           if (newPlaylist.length === 0) {
             this.currentIndex = 0
             this.playedHistory = []
             this.shuffledPlaylist = []
-            console.log('播放列表已清空，重置状态')
+            // 安全地停止当前播放并清理音频状态
+            if (this.$refs.audioPlayer) {
+              this.$refs.audioPlayer.pause()
+              this.$refs.audioPlayer.currentTime = 0
+            }
+            this.isPlaying = false
+            this.currentTime = 0
+            this.duration = 0
+            if (process.env.NODE_ENV === 'development') {
+              console.log('播放列表已清空，重置状态')
+            }
             return
           }
           
-          // 播放列表变化时不重置历史记录,只确保 currentIndex 在有效范围内
-          if (this.currentIndex >= newPlaylist.length) {
-            this.currentIndex = Math.max(0, newPlaylist.length - 1)
-            console.log('调整 currentIndex 到有效范围:', this.currentIndex)
-          }
-          
-          // 如果在随机播放模式下，重新生成随机播放列表
-          if (this.playMode === 'shuffle' && newPlaylist.length > 0) {
-            this.generateShuffledPlaylist()
-            console.log('播放列表变化，重新生成随机播放列表')
+          // 优化：只有在长度发生变化时才重新计算索引
+          const oldLength = oldPlaylist ? oldPlaylist.length : 0
+          if (oldLength !== newPlaylist.length) {
+            // 播放列表变化时不重置历史记录,只确保 currentIndex 在有效范围内
+            if (this.currentIndex >= newPlaylist.length) {
+              this.currentIndex = Math.max(0, newPlaylist.length - 1)
+              if (process.env.NODE_ENV === 'development') {
+                console.log('调整 currentIndex 到有效范围:', this.currentIndex)
+              }
+            }
+            
+            // 如果在随机播放模式下，重新生成随机播放列表
+            if (this.playMode === 'shuffle' && newPlaylist.length > 0) {
+              // 使用 nextTick 异步处理，避免阻塞UI
+              this.$nextTick(() => {
+                this.generateShuffledPlaylist()
+                if (process.env.NODE_ENV === 'development') {
+                  console.log('播放列表变化，重新生成随机播放列表')
+                }
+              })
+            }
           }
         } catch (error) {
           console.error('处理播放列表变化时出错:', error)
         }
       },
-      deep: true
+      deep: false // 改为浅比较，提高性能
     },
     // 监听当前播放索引变化，记录播放顺序
     currentIndex: {
@@ -427,26 +484,28 @@ export default {
           this.historyPointer = -1
         }
         
-        // 注意：不在这里触发 loadSong，由 playNext/playPrevious 等方法直接调用
-        // 只在索引改变后通知父组件（但不触发重复加载）
-        if (newIndex !== -1 && this.playlist[newIndex] && !this.isSwitchingSong) {
-          try {
-            console.log('🎵 [IndexChange] 通知父组件歌曲变化:', {
-              newIndex,
-              song: this.playlist[newIndex]?.name || this.playlist[newIndex]?.filename,
-              currentSong: this.currentSong?.name || this.currentSong?.filename
-            })
-            this.$emit('song-changed', this.playlist[newIndex])
-          } catch (error) {
-            console.error('🎵 [IndexChange] 通知父组件时出错:', error)
-          }
-        }
+        // 注意：不在这里通知父组件，避免与 loadSong 中的通知重复触发
+        // 父组件同步由 loadSong 成功后统一通过 'song-changed' 事件进行
       }
     }
   },
   mounted() {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🎵 [MusicPlayer] 组件已挂载')
+      console.log('🎵 [MusicPlayer] audioPlayer ref 状态:', !!this.$refs.audioPlayer)
+    }
+    
     // 添加全局错误处理
     this.$nextTick(() => {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🎵 [MusicPlayer] nextTick 后 audioPlayer ref 状态:', !!this.$refs.audioPlayer)
+      }
+      
+      // 标记组件为已准备就绪
+      this.isComponentReady = true
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🎵 [MusicPlayer] 组件已准备就绪')
+      }
       try {
         // 从 localStorage 恢复音量和播放模式
         const savedVolume = localStorage.getItem('player_volume')
@@ -490,39 +549,89 @@ export default {
   methods: {
     // 加载歌曲
     async loadSong(song) {
+      // 防止重复加载 - 更严格的检查
+      if (this.isLoadingSong) {
+        console.log('🎵 [LoadSong] 正在加载中，忽略重复请求')
+        return false
+      }
+      
+      // 检查组件是否已挂载 - 增强重试机制
+      if (!this.$refs.audioPlayer) {
+        console.log('🎵 [LoadSong] 组件未完全挂载，尝试重试机制')
+        
+        // 多次重试，每次间隔更长
+        const maxRetries = 5
+        for (let i = 0; i < maxRetries; i++) {
+          await new Promise(resolve => setTimeout(resolve, (i + 1) * 100)) // 100ms, 200ms, 300ms...
+          await this.$nextTick()
+          
+          if (this.$refs.audioPlayer) {
+            console.log(`🎵 [LoadSong] 第 ${i + 1} 次重试成功，音频元素已准备就绪`)
+            break
+          }
+          
+          if (i === maxRetries - 1) {
+            console.error('🎵 [LoadSong] 所有重试均失败，音频元素不可用')
+            this.isLoadingSong = false
+            return false
+          }
+        }
+      }
+      
+      // 如果传入的歌曲与当前歌曲相同，不重复加载
+      if (this.currentSong && song && this.currentSong.hash === song.hash) {
+        console.log('🎵 [LoadSong] 歌曲已加载，跳过重复请求:', song.name || song.filename)
+        return true // 返回 true 因为歌曲已经加载
+      }
+      
+      // 设置加载状态
+      this.isLoadingSong = true
+      
+      // 性能监控：记录切歌开始时间
+      const loadStartTime = performance.now()
+      
       // 保存当前播放的歌曲作为备份
       const previousSong = this.currentSong
       const wasPlaying = this.isPlaying
       
-      console.log('🎵 [LoadSong] 开始加载歌曲:', {
-        songName: song.name || song.filename,
-        songHash: song.hash,
-        previousSong: previousSong?.name || previousSong?.filename,
-        previousSongHash: previousSong?.hash,
-        wasPlaying,
-        currentIndex: this.currentIndex,
-        isSwitchingSong: this.isSwitchingSong
-      })
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🎵 [LoadSong] 开始加载歌曲:', {
+          songName: song.name || song.filename,
+          songHash: song.hash,
+          previousSong: previousSong?.name || previousSong?.filename,
+          previousSongHash: previousSong?.hash,
+          wasPlaying,
+          currentIndex: this.currentIndex,
+          isSwitchingSong: this.isSwitchingSong,
+          showLyricView: this.showLyricView
+        })
+      }
       
       try {
         
         // 第一步：获取歌曲详细信息（如果需要）
         let audioDetail = song
         if (!song.album_audio_id || song.album_audio_id === 0) {
-          console.log('获取歌曲详情...')
+          if (process.env.NODE_ENV === 'development') {
+            console.log('获取歌曲详情...')
+          }
           const detailResponse = await getSongDetail(song.hash)
-          console.log('歌曲详情响应:', detailResponse)
+          if (process.env.NODE_ENV === 'development') {
+            console.log('歌曲详情响应:', detailResponse)
+          }
           
           if (detailResponse && detailResponse.status === 1 && detailResponse.data && detailResponse.data.length > 0) {
             audioDetail = { ...song, ...detailResponse.data[0] }
-            console.log('合并后的歌曲信息:', audioDetail)
-            console.log('歌手信息字段检查:', {
-              'singerinfo': audioDetail.singerinfo,
-              'singername': audioDetail.singername,
-              'author_name': audioDetail.author_name,
-              'singer_name': audioDetail.singer_name,
-              'filename': audioDetail.filename
-            })
+            if (process.env.NODE_ENV === 'development') {
+              console.log('合并后的歌曲信息:', audioDetail)
+              console.log('歌手信息字段检查:', {
+                'singerinfo': audioDetail.singerinfo,
+                'singername': audioDetail.singername,
+                'author_name': audioDetail.author_name,
+                'singer_name': audioDetail.singer_name,
+                'filename': audioDetail.filename
+              })
+            }
           }
         }
         
@@ -533,7 +642,9 @@ export default {
           audioDetail.album_audio_id || 0
         )
         
-        console.log('播放地址响应状态:', urlResponse.status)
+        if (process.env.NODE_ENV === 'development') {
+          console.log('播放地址响应状态:', urlResponse.status)
+        }
         
         // 检查响应状态
         if (urlResponse && urlResponse.status === 1) {
@@ -542,44 +653,73 @@ export default {
           // 参考 BetterKugou：response.url 是一个数组，取第一个元素
           if (urlResponse.url && Array.isArray(urlResponse.url) && urlResponse.url.length > 0) {
             playUrl = urlResponse.url[0]  // 重要：取数组第一个元素
-            console.log('获取播放URL:', playUrl)
+            if (process.env.NODE_ENV === 'development') {
+              console.log('获取播放URL:', playUrl)
+            }
             
             // 如果是 http，转换为 https（提高安全性）
             if (playUrl && playUrl.startsWith('http://')) {
               playUrl = playUrl.replace('http://', 'https://')
-              console.log('转换为HTTPS')
+              if (process.env.NODE_ENV === 'development') {
+                console.log('转换为HTTPS')
+              }
             }
           }
           // 备用：直接字符串格式
           else if (urlResponse.url && typeof urlResponse.url === 'string') {
             playUrl = urlResponse.url
-            console.log('获取播放URL (字符串):', playUrl)
+            if (process.env.NODE_ENV === 'development') {
+              console.log('获取播放URL (字符串):', playUrl)
+            }
           }
           
           if (playUrl && typeof playUrl === 'string') {
-            console.log('🎵 [LoadSong] 设置音频源:', playUrl)
+            if (process.env.NODE_ENV === 'development') {
+              console.log('🎵 [LoadSong] 设置音频源:', playUrl)
+              console.log('🎵 [LoadSong] 更新 currentSong 前:', {
+                oldCurrentSong: this.currentSong?.name || this.currentSong?.filename,
+                oldCurrentSongHash: this.currentSong?.hash,
+                newSong: song.name || song.filename,
+                newSongHash: song.hash
+              })
+            }
+            
             const audioEl = this.$refs.audioPlayer
+            if (!audioEl) {
+              console.error('🎵 [LoadSong] 音频元素不存在，组件可能未完全挂载')
+              // 清除加载状态
+              this.isLoadingSong = false
+              return false
+            }
             audioEl.src = playUrl
             
-            console.log('🎵 [LoadSong] 更新 currentSong 前:', {
-              oldCurrentSong: this.currentSong?.name || this.currentSong?.filename,
-              oldCurrentSongHash: this.currentSong?.hash,
-              newSong: song.name || song.filename,
-              newSongHash: song.hash
-            })
-            
             // 只在成功获取播放地址后才更新 currentSong
-            this.currentSong = song
+            // 添加检查，避免与当前歌曲重复赋值
+            if (!this.currentSong || this.currentSong.hash !== song.hash) {
+              if (process.env.NODE_ENV === 'development') {
+                console.log('🎵 [LoadSong] 更新 currentSong 前:', {
+                  oldCurrentSong: this.currentSong?.name || this.currentSong?.filename,
+                  oldCurrentSongHash: this.currentSong?.hash,
+                  newSong: song.name || song.filename,
+                  newSongHash: song.hash
+                })
+              }
+              this.currentSong = song
+            }
             
-            console.log('🎵 [LoadSong] 更新 currentSong 后:', {
-              currentSong: this.currentSong?.name || this.currentSong?.filename,
-              currentSongHash: this.currentSong?.hash
-            })
+            if (process.env.NODE_ENV === 'development') {
+              console.log('🎵 [LoadSong] 更新 currentSong 后:', {
+                currentSong: this.currentSong?.name || this.currentSong?.filename,
+                currentSongHash: this.currentSong?.hash
+              })
+            }
             
             // 自动播放
             try {
               await audioEl.play()
-              console.log('🎵 [LoadSong] 播放成功')
+              if (process.env.NODE_ENV === 'development') {
+                console.log('🎵 [LoadSong] 播放成功')
+              }
               
               // 设置系统媒体会话信息 (SMTC)
               this.updateMediaSession(audioDetail)
@@ -594,13 +734,17 @@ export default {
               
               // 加载歌词（不阻塞，失败也不影响播放）
               this.loadLyric(song).catch(err => {
-                console.warn('歌词加载失败，但不影响播放:', err.message)
+                if (process.env.NODE_ENV === 'development') {
+                  console.warn('歌词加载失败，但不影响播放:', err.message)
+                }
               })
             } catch (playError) {
               console.error('播放失败:', playError.message)
               this.showError(`播放失败: ${playError.message}`)
               // 恢复之前的歌曲
               this.currentSong = previousSong
+              // 清除加载状态
+              this.isLoadingSong = false
               return false
             }
           } else {
@@ -608,6 +752,8 @@ export default {
             this.showError('播放地址格式错误，跳过该歌曲')
             // 恢复之前的歌曲
             this.currentSong = previousSong
+            // 清除加载状态
+            this.isLoadingSong = false
             return false
           }
         } else {
@@ -616,26 +762,51 @@ export default {
           this.showError(errorMsg)
           // 恢复之前的歌曲
           this.currentSong = previousSong
+          // 清除加载状态
+          this.isLoadingSong = false
           return false
         }
         
-        console.log('🎵 [LoadSong] 加载完成，返回 true')
+        // 性能监控：记录加载完成时间
+        const loadEndTime = performance.now()
+        const loadDuration = loadEndTime - loadStartTime
+        
+        if (process.env.NODE_ENV === 'development') {
+          console.log('🎵 [LoadSong] 加载完成，返回 true', {
+            duration: loadDuration.toFixed(2) + 'ms',
+            performanceGrade: loadDuration < 100 ? '优秀' : loadDuration < 300 ? '良好' : loadDuration < 500 ? '一般' : '需要优化'
+          })
+        }
         
         // 主动发出 song-changed 事件，确保父组件收到更新
         try {
-          console.log('🎵 [LoadSong] 发出 song-changed 事件:', this.currentSong?.name)
+          if (process.env.NODE_ENV === 'development') {
+            console.log('🎵 [LoadSong] 发出 song-changed 事件:', this.currentSong?.name)
+          }
           this.$emit('song-changed', this.currentSong)
         } catch (error) {
           console.error('🎵 [LoadSong] 发出 song-changed 事件失败:', error)
         }
         
+        // 延迟清除加载状态，避免响应式更新期间的重复加载
+        this.$nextTick(() => {
+          this.isLoadingSong = false
+          if (process.env.NODE_ENV === 'development') {
+            console.log('🎵 [LoadSong] 延迟清除加载状态')
+          }
+        })
+        
         return true
       } catch (error) {
-        console.error('🎵 [LoadSong] 加载歌曲失败:', error)
+        if (process.env.NODE_ENV === 'development') {
+          console.error('🎵 [LoadSong] 加载歌曲失败:', error)
+          console.log('🎵 [LoadSong] 恢复之前的歌曲:', previousSong?.name || previousSong?.filename)
+        }
         this.showError(`加载歌曲失败: ${error.response?.data?.msg || error.message}`)
         // 恢复之前的歌曲
-        console.log('🎵 [LoadSong] 恢复之前的歌曲:', previousSong?.name || previousSong?.filename)
         this.currentSong = previousSong
+        // 清除加载状态
+        this.isLoadingSong = false
         return false
       }
     },
@@ -672,10 +843,12 @@ export default {
     // 加载歌词
     async loadLyric(song) {
       try {
-        console.log('开始加载歌词，歌曲信息:', {
-          hash: song.hash,
-          album_audio_id: song.album_audio_id
-        })
+        if (process.env.NODE_ENV === 'development') {
+          console.log('开始加载歌词，歌曲信息:', {
+            hash: song.hash,
+            album_audio_id: song.album_audio_id
+          })
+        }
         
         // 设置超时和重试机制
         const lyricResponse = await Promise.race([
@@ -685,41 +858,70 @@ export default {
           )
         ])
         
-        console.log('歌词API响应:', lyricResponse)
+        if (process.env.NODE_ENV === 'development') {
+          console.log('歌词API响应:', lyricResponse)
+        }
         
         // 检查API响应状态 (可能是status: 200 或 status: 1)
         if (lyricResponse && (lyricResponse.status === 200 || lyricResponse.status === 1)) {
+          // 保存完整的歌词数据（包含翻译信息）
+          this.currentLyricData = lyricResponse
+          
+          if (process.env.NODE_ENV === 'development') {
+            console.log('🎵 歌词API完整响应:')
+            console.log('  - 响应状态:', lyricResponse.status)
+            console.log('  - 所有字段:', Object.keys(lyricResponse))
+            console.log('  - language字段存在:', 'language' in lyricResponse)
+            console.log('  - decodeContent存在:', 'decodeContent' in lyricResponse)
+            if (lyricResponse.language) {
+              console.log('  - language字段内容:', lyricResponse.language.substring(0, 200))
+            }
+          }
+          
           // 优先使用解码后的内容
           if (lyricResponse.decodeContent) {
             this.currentLyrics = lyricResponse.decodeContent
-            console.log('歌词加载成功（已解码），内容长度:', lyricResponse.decodeContent.length)
-            console.log('设置的歌词内容预览:', this.currentLyrics.substring(0, 200))
+            if (process.env.NODE_ENV === 'development') {
+              console.log('歌词加载成功（已解码），内容长度:', lyricResponse.decodeContent.length)
+              console.log('设置的歌词内容预览:', this.currentLyrics.substring(0, 200))
+            }
           } else if (lyricResponse.content) {
             // 如果没有解码内容，尝试使用原始content（可能是base64编码）
             try {
               // 尝试base64解码
               const decoded = atob(lyricResponse.content)
               this.currentLyrics = decoded
-              console.log('歌词base64解码成功，内容长度:', decoded.length)
+              if (process.env.NODE_ENV === 'development') {
+                console.log('歌词base64解码成功，内容长度:', decoded.length)
+              }
             } catch (e) {
               // 如果解码失败，直接使用原始内容
               this.currentLyrics = lyricResponse.content
-              console.log('使用原始歌词内容，长度:', lyricResponse.content.length)
+              if (process.env.NODE_ENV === 'development') {
+                console.log('使用原始歌词内容，长度:', lyricResponse.content.length)
+              }
             }
           } else if (lyricResponse.data && lyricResponse.data.content) {
             // 尝试从data.content获取
             this.currentLyrics = lyricResponse.data.content
-            console.log('从data.content获取歌词成功')
+            if (process.env.NODE_ENV === 'development') {
+              console.log('从data.content获取歌词成功')
+            }
           } else {
             // 打印完整响应以便调试
-            console.log('完整歌词API响应:', JSON.stringify(lyricResponse, null, 2))
+            if (process.env.NODE_ENV === 'development') {
+              console.log('完整歌词API响应:', JSON.stringify(lyricResponse, null, 2))
+              console.log('歌词内容为空，使用默认歌词')
+            }
             this.setDefaultLyrics(song)
-            console.log('歌词内容为空，使用默认歌词')
           }
         } else {
-          console.log('完整响应:', JSON.stringify(lyricResponse, null, 2))
+          if (process.env.NODE_ENV === 'development') {
+            console.log('完整响应:', JSON.stringify(lyricResponse, null, 2))
+            console.log('歌词获取失败，状态:', lyricResponse?.status)
+          }
+          this.currentLyricData = null
           this.setDefaultLyrics(song)
-          console.log('歌词获取失败，状态:', lyricResponse?.status)
         }
       } catch (error) {
         console.error('加载歌词失败:', error)
@@ -730,6 +932,7 @@ export default {
           this.setDefaultLyrics(song)
         } else {
           this.currentLyrics = '[00:00.00]歌词服务暂时不可用'
+          this.currentLyricData = null
         }
       }
     },
@@ -746,6 +949,7 @@ export default {
 [00:08.00] 请欣赏
 [00:10.00]
 [00:30.00] 享受音乐带来的美好时光`
+      this.currentLyricData = null
     },
     
     // 播放/暂停
@@ -769,20 +973,25 @@ export default {
     async playPrevious() {
       if (this.playlist.length === 0) return
       
-      // 防止并发切歌
+      // 防止并发切歌，使用更短的锁定时间
       if (this.isSwitchingSong) {
-        console.warn('正在切歌中，忽略本次请求')
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('正在切歌中，忽略本次请求')
+        }
         return
       }
       
-      // 清除防抖定时器
-      if (this.switchSongDebounceTimer) {
-        clearTimeout(this.switchSongDebounceTimer)
-      }
-      
-      // 设置切歌锁
+      // 设置切歌锁，使用更轻量的锁机制
       this.isSwitchingSong = true
-      console.log('开始切歌（上一曲），已加锁')
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🎵 开始切歌（上一曲）- isSwitchingSong:', this.isSwitchingSong, 'showLyricView:', this.showLyricView)
+        // 性能监控：记录RAF调用计数
+        if (window._lyricRafCount) {
+          console.log('🔄 切歌前RAF调用总数:', window._lyricRafCount)
+          window._switchStartRafCount = window._lyricRafCount
+        }
+      }
       
       const originalIndex = this.currentIndex
       let attempts = 0
@@ -849,11 +1058,17 @@ export default {
         this.showError('播放列表中没有可播放的歌曲')
       } finally {
         this.isNavigatingHistory = false // 重置导航标志
-        // 解除切歌锁，添加防抖延迟
-        this.switchSongDebounceTimer = setTimeout(() => {
-          this.isSwitchingSong = false
-          console.log('切歌完成，已解锁')
-        }, 300)
+        // 立即解除切歌锁，不使用延迟
+        this.isSwitchingSong = false
+        
+        if (process.env.NODE_ENV === 'development') {
+          console.log('✅ 上一曲切歌完成，已解锁 - isSwitchingSong:', this.isSwitchingSong)
+          // 性能监控：计算切歌期间的RAF调用增量
+          if (window._switchStartRafCount && window._lyricRafCount) {
+            const rafIncrease = window._lyricRafCount - window._switchStartRafCount
+            console.log('🔄 上一曲切歌期间RAF调用增量:', rafIncrease, '总计:', window._lyricRafCount)
+          }
+        }
       }
     },
     
@@ -861,20 +1076,25 @@ export default {
     async playNext() {
       if (this.playlist.length === 0) return
       
-      // 防止并发切歌
+      // 防止并发切歌，使用更短的锁定时间
       if (this.isSwitchingSong) {
-        console.warn('正在切歌中，忽略本次请求')
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('正在切歌中，忽略本次请求')
+        }
         return
       }
       
-      // 清除防抖定时器
-      if (this.switchSongDebounceTimer) {
-        clearTimeout(this.switchSongDebounceTimer)
-      }
-      
-      // 设置切歌锁
+      // 设置切歌锁，使用更轻量的锁机制
       this.isSwitchingSong = true
-      console.log('开始切歌（下一曲），已加锁')
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🎵 开始切歌（下一曲）- isSwitchingSong:', this.isSwitchingSong, 'showLyricView:', this.showLyricView)
+        // 性能监控：记录RAF调用计数
+        if (window._lyricRafCount) {
+          console.log('🔄 切歌前RAF调用总数:', window._lyricRafCount)
+          window._switchStartRafCount = window._lyricRafCount
+        }
+      }
       
       try {
         const originalIndex = this.currentIndex
@@ -962,11 +1182,17 @@ export default {
       this.currentIndex = originalIndex
       this.showError('播放列表中没有可播放的歌曲')
       } finally {
-        // 解除切歌锁，添加防抖延迟
-        this.switchSongDebounceTimer = setTimeout(() => {
-          this.isSwitchingSong = false
-          console.log('切歌完成，已解锁')
-        }, 300)
+        // 立即解除切歌锁，不使用延迟
+        this.isSwitchingSong = false
+        
+        if (process.env.NODE_ENV === 'development') {
+          console.log('✅ 下一曲切歌完成，已解锁 - isSwitchingSong:', this.isSwitchingSong)
+          // 性能监控：计算切歌期间的RAF调用增量
+          if (window._switchStartRafCount && window._lyricRafCount) {
+            const rafIncrease = window._lyricRafCount - window._switchStartRafCount
+            console.log('🔄 下一曲切歌期间RAF调用增量:', rafIncrease, '总计:', window._lyricRafCount)
+          }
+        }
       }
     },
     
@@ -1179,6 +1405,13 @@ export default {
     async showLyrics() {
       if (!this.currentSong) return
       
+      // 如果正在切歌中，延迟显示歌词，避免资源竞争
+      if (this.isSwitchingSong) {
+        console.log('切歌中，延迟显示歌词')
+        setTimeout(() => this.showLyrics(), 100)
+        return
+      }
+      
       // 如果没有歌词，尝试加载
       if (!this.currentLyrics) {
         await this.loadLyric(this.currentSong)
@@ -1190,6 +1423,13 @@ export default {
 
     // 关闭歌词界面
     closeLyrics() {
+      // 如果正在切歌中，立即关闭，不要等待动画
+      if (this.isSwitchingSong) {
+        this.showLyricView = false
+        this.$emit('lyric-view-changed', false)
+        return
+      }
+      
       this.showLyricView = false
       this.$emit('lyric-view-changed', false)
     },
@@ -2096,19 +2336,19 @@ export default {
   }
 }
 
-/* 歌词界面过渡动画 */
+/* 歌词界面过渡动画 - 优化后更快更平滑 */
 .lyric-view-enter-active,
 .lyric-view-leave-active {
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 
 .lyric-view-enter-from {
   opacity: 0;
-  transform: scale(1.1);
+  transform: scale(1.05);
 }
 
 .lyric-view-leave-to {
   opacity: 0;
-  transform: scale(0.9);
+  transform: scale(0.95);
 }
 </style>

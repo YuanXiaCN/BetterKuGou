@@ -1,8 +1,41 @@
 <template>
   <div class="title-bar" :class="{ 'lyric-mode': isLyricViewVisible }">
-    <div class="drag-area">
+    <!-- Logo区域 -->
+    <div class="logo-container">
+      <img src="../icon/logo.png" alt="Logo" class="logo-icon" />
+      <span class="app-name">BETTERKUGOU</span>
+    </div>
+    
+    <!-- 左侧拖拽区域 -->
+    <div class="drag-area-left">
       <!-- 可拖动区域 -->
     </div>
+    
+    <!-- 搜索框（居中） -->
+    <div class="search-container">
+      <div class="search-box">
+        <input 
+          ref="searchInput"
+          v-model="searchKeyword" 
+          type="text" 
+          placeholder="搜索"
+          @keyup.enter="performSearch"
+          @focus="isSearchFocused = true"
+          @blur="isSearchFocused = false"
+        />
+        <button class="search-btn" @click="performSearch" :disabled="!searchKeyword.trim()">
+          <svg viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
+            <path d="M909.6 854.5L649.9 594.8C690.2 542.7 712 479 712 412c0-80.2-31.3-155.4-87.9-212.1-56.6-56.7-132-87.9-212.1-87.9s-155.5 31.3-212.1 87.9C143.2 256.5 112 331.8 112 412c0 80.1 31.3 155.5 87.9 212.1C256.5 680.8 331.8 712 412 712c67 0 130.6-21.8 182.7-62l259.7 259.6a8.2 8.2 0 0011.6 0l43.6-43.5a8.2 8.2 0 000-11.6zM570.4 570.4C528 612.7 471.8 636 412 636s-116-23.3-158.4-65.6C211.3 528 188 471.8 188 412s23.3-116.1 65.6-158.4C296 211.3 352.2 188 412 188s116.1 23.3 158.4 65.6S636 352.2 636 412s-23.3 116.1-65.6 158.4z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    
+    <!-- 右侧拖拽区域 -->
+    <div class="drag-area-right">
+      <!-- 可拖动区域 -->
+    </div>
+    
     <div class="window-controls">
       <!-- 用户信息或登录按钮 -->
       <div v-if="userLoggedIn && userInfo" ref="userInfoBtn" class="user-info" @click.stop="handleUserClick">
@@ -81,6 +114,8 @@ export default {
       isMaximized: false,
       showUserMenu: false,
       userMenuPosition: { top: 0, right: 0 },
+      searchKeyword: '',
+      isSearchFocused: false,
       // 图标路径配置 - 如需替换图标,只需修改这里的路径
       icons: {
         minimize: minimizeIcon,
@@ -166,6 +201,19 @@ export default {
       if (window.electronAPI) {
         window.electronAPI.close()
       }
+    },
+    performSearch() {
+      const keyword = this.searchKeyword.trim()
+      if (!keyword) {
+        console.log('搜索关键词为空')
+        return
+      }
+      console.log('执行搜索:', keyword)
+      // 发射搜索事件到父组件
+      this.$emit('search', keyword)
+      // 清空搜索框并失去焦点
+      // this.searchKeyword = ''
+      // this.$refs.searchInput.blur()
     }
   }
 }
@@ -178,7 +226,6 @@ export default {
   backdrop-filter: blur(10px);
   display: flex;
   align-items: center;
-  justify-content: space-between;
   -webkit-app-region: drag;
   user-select: none;
   position: relative;
@@ -193,15 +240,142 @@ export default {
   -webkit-backdrop-filter: none !important;
 }
 
-.drag-area {
+.title-bar.lyric-mode .search-container {
+  /* 全屏歌词时完全隐藏搜索框，避免遮挡与误触 */
+  display: none !important;
+}
+
+.title-bar.lyric-mode .logo-container {
+  opacity: 0.3;
+}
+
+/* Logo容器 */
+.logo-container {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 0 var(--spacing-md);
+  -webkit-app-region: no-drag;
+  transition: opacity 0.3s ease;
+  flex-shrink: 0;
+  min-width: 200px;
+}
+
+.logo-icon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  transition: transform 0.3s ease;
+}
+
+.logo-icon:hover {
+  transform: scale(1.05);
+}
+
+.app-name {
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  color: var(--color-text);
+  letter-spacing: 0.5px;
+  user-select: none;
+  transition: color 0.3s ease;
+}
+
+/* 拖拽区域 */
+.drag-area-left,
+.drag-area-right {
   flex: 1;
   height: 100%;
+  min-width: 0;
 }
+
+/* 搜索容器 */
+.search-container {
+  -webkit-app-region: no-drag;
+  transition: opacity 0.3s ease;
+  display: flex;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 300px;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  width: 280px;
+  transition: all 0.3s ease;
+}
+
+.search-box:hover {
+  background: rgba(var(--color-background-lighter-rgb, 255, 255, 255), 0.05);
+  border-color: var(--color-text-tertiary);
+}
+
+.search-box:focus-within {
+  background: var(--color-background-lighter);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-alpha);
+}
+
+.search-box input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: var(--spacing-sm) var(--spacing-md);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  height: 32px;
+}
+
+.search-box input::placeholder {
+  color: var(--color-text-tertiary);
+  opacity: 0.7;
+  transition: opacity 0.3s ease;
+}
+
+.search-box:focus-within input::placeholder {
+  opacity: 0.9;
+}
+
+.search-btn {
+  background: transparent;
+  border: none;
+  padding: var(--spacing-sm);
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  height: 32px;
+  width: 32px;
+}
+
+.search-btn:hover:not(:disabled) {
+  color: var(--color-primary);
+  background: var(--color-background-hover);
+}
+
+.search-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+
 
 .window-controls {
   display: flex;
   height: 100%;
   -webkit-app-region: no-drag;
+  flex-shrink: 0;
 }
 
 .control-btn {
