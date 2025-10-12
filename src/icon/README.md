@@ -45,3 +45,15 @@
 
 ## next_play.svg
 - 添加到下一首播放图标
+
+## previous.svg
+- 上一首图标
+
+## play.svg
+- 播放图标
+
+## stop.svg
+- 暂停图标
+
+## next.svg
+- 下一首图标

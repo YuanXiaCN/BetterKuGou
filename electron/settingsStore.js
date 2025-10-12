@@ -129,7 +129,8 @@ function createDefaults(app) {
       autoLaunch: false,
       restorePlaylist: true,
       restorePlaybackState: true,
-      defaultPage: 'home'
+      defaultPage: 'home',
+      minimizeToTray: false
     },
     session: {
       playlist: [],

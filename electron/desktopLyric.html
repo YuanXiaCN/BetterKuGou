@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>桌面歌词</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+      background: transparent;
+      color: #ffffff;
+      overflow: hidden;
+      cursor: move;
+      -webkit-app-region: drag;
+    }
+
+    .lyric-container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+      background: transparent;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      border-radius: 12px;
+      border: none;
+      box-shadow: none;
+      transition: all 0.3s ease;
+    }
+
+    .lyric-container:hover:not(.locked) {
+      background: linear-gradient(135deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.6) 100%);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.1);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+
+    .lyric-container.locked {
+      background: linear-gradient(135deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.6) 100%);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.1);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+
+    .current-lyric {
+      font-size: 24px;
+      font-weight: 600;
+      text-align: center;
+      text-shadow: 2px 2px 8px rgba(0,0,0,1), 1px 1px 4px rgba(0,0,0,0.9);
+      margin-bottom: 8px;
+      opacity: 0.95;
+      transition: all 0.3s ease;
+      line-height: 1.4;
+      word-wrap: break-word;
+      max-width: 100%;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* 卡拉OK逐字效果样式 */
+    .karaoke-char {
+      display: inline-block;
+      color: rgba(255, 255, 255, 0.9);
+      text-shadow: 2px 2px 8px rgba(0,0,0,1), 1px 1px 4px rgba(0,0,0,0.9);
+      /* 移除transition，避免动画计算消耗性能 */
+    }
+
+    .karaoke-char.is-space {
+      width: 0.25em;
+      min-width: 0.25em;
+    }
+
+    /* 正在播放的字符 - 使用渐进式填充 */
+    .karaoke-char.singing {
+      background: linear-gradient(90deg, #feca57 0%, #feca57 var(--fill-progress, 0%), rgba(255, 255, 255, 0.9) var(--fill-progress, 0%), rgba(255, 255, 255, 0.9) 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      text-shadow: 0 0 6px rgba(254, 202, 87, 0.3);
+      /* 使用transform替代重复的background更新来提升性能 */
+      will-change: background-position;
+    }
+
+    /* 已唱完的字符 */
+    .karaoke-char.sung {
+      color: #feca57;
+      text-shadow: 0 0 8px rgba(254, 202, 87, 0.5), 2px 2px 8px rgba(0,0,0,1);
+    }
+
+    /* 当前行的整体高亮 */
+    .current-lyric.active-line {
+      transform: scale(1.05);
+      text-shadow: 
+        0 0 10px rgba(254, 202, 87, 0.6),
+        2px 2px 8px rgba(0,0,0,1), 
+        1px 1px 4px rgba(0,0,0,0.9);
+    }
+
+    .next-lyric {
+      font-size: 16px;
+      font-weight: 400;
+      text-align: center;
+      color: rgba(255,255,255,0.8);
+      text-shadow: 2px 2px 6px rgba(0,0,0,1), 1px 1px 3px rgba(0,0,0,0.8);
+      opacity: 0.8;
+      transition: all 0.3s ease;
+      line-height: 1.3;
+      word-wrap: break-word;
+      max-width: 100%;
+    }
+
+    .song-info {
+      font-size: 14px;
+      color: rgba(255,255,255,0.7);
+      text-align: center;
+      margin-bottom: 12px;
+      text-shadow: 1px 1px 4px rgba(0,0,0,1), 1px 1px 2px rgba(0,0,0,0.8);
+    }
+
+    .no-lyric {
+      font-size: 18px;
+      color: rgba(255,255,255,0.8);
+      text-align: center;
+      font-style: italic;
+    }
+
+    .control-menu {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      -webkit-app-region: no-drag;
+    }
+
+    .lyric-container:hover:not(.locked) .control-menu {
+      opacity: 1;
+    }
+
+    .lyric-container.locked .control-menu {
+      opacity: 0 !important;
+    }
+
+    .menu-btn {
+      background: rgba(255,255,255,0.2);
+      border: none;
+      color: white;
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-left: 4px;
+      transition: all 0.2s ease;
+      font-size: 12px;
+    }
+
+    .menu-btn:hover {
+      background: rgba(255,255,255,0.3);
+    }
+
+    .controls {
+      display: flex;
+      gap: 4px;
+    }
+
+    /* 锁定状态样式 */
+    .locked {
+      cursor: default;
+      -webkit-app-region: no-drag;
+    }
+
+    .locked .control-menu {
+      opacity: 0 !important;
+    }
+
+    /* 锁定指示器 */
+    .lock-indicator {
+      position: absolute;
+      top: 5px;
+      left: 5px;
+      color: rgba(255,255,255,0.6);
+      font-size: 12px;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .locked .lock-indicator {
+      opacity: 1;
+    }
+
+    /* 字体大小变体 */
+    .size-small .current-lyric { font-size: 18px; }
+    .size-small .next-lyric { font-size: 14px; }
+    .size-small .song-info { font-size: 12px; }
+
+    .size-medium .current-lyric { font-size: 24px; }
+    .size-medium .next-lyric { font-size: 16px; }
+    .size-medium .song-info { font-size: 14px; }
+
+    .size-large .current-lyric { font-size: 32px; }
+    .size-large .next-lyric { font-size: 20px; }
+    .size-large .song-info { font-size: 16px; }
+
+    /* 主题样式 */
+    .theme-classic {
+      background: linear-gradient(135deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.6) 100%);
+      color: #ffffff;
+    }
+
+    .theme-gradient {
+      background: linear-gradient(135deg, rgba(102,126,234,0.8) 0%, rgba(118,75,162,0.8) 100%);
+      color: #ffffff;
+    }
+
+    .theme-minimal {
+      background: rgba(0,0,0,0.5);
+      color: #ffffff;
+      border: none;
+    }
+
+    /* 动画效果 */
+    @keyframes lyricFadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .lyric-change .current-lyric {
+      animation: lyricFadeIn 0.5s ease-out;
+    }
+  </style>
+</head>
+<body>
+  <div class="lyric-container" id="lyricContainer">
+    <div class="lock-indicator">🔒</div>
+    <div class="control-menu">
+      <div class="controls">
+        <button class="menu-btn" id="sizeBtn" title="字体大小">A</button>
+        <button class="menu-btn" id="themeBtn" title="主题">🎨</button>
+        <button class="menu-btn" id="closeBtn" title="关闭">✕</button>
+      </div>
+    </div>
+    
+    <div class="song-info" id="songInfo">暂无播放</div>
+    <div class="current-lyric" id="currentLyric">请播放音乐以显示歌词</div>
+    <div class="next-lyric" id="nextLyric"></div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron')
+    
+    // 状态管理
+    let isLocked = false
+    let currentSize = 'medium' // small, medium, large
+    let currentTheme = 'classic' // classic, gradient, minimal
+    let currentLyrics = []
+    let currentTime = 0
+    let currentSong = null
+    
+    // 性能优化相关
+    let lastUpdateTime = 0
+    let updateRAFId = null
+    let currentLyricIndex = -1
+    let lastRenderedHTML = ''
+    let isDOMReady = false
+    let cachedCharElements = null
+    let lastProcessedWordIndex = -1
+    let karaokeUpdateCache = new Map()
+
+    // DOM 元素
+    const container = document.getElementById('lyricContainer')
+    const songInfo = document.getElementById('songInfo')
+    const currentLyric = document.getElementById('currentLyric')
+    const nextLyric = document.getElementById('nextLyric')
+    const sizeBtn = document.getElementById('sizeBtn')
+    const themeBtn = document.getElementById('themeBtn')
+    const closeBtn = document.getElementById('closeBtn')
+
+    // 初始化
+    function init() {
+      // 设置初始样式
+      updateSize()
+      updateTheme()
+      
+      // 绑定事件
+      sizeBtn.addEventListener('click', cycleSize)
+      themeBtn.addEventListener('click', cycleTheme)
+      closeBtn.addEventListener('click', closeLyric)
+
+      // 监听主进程消息
+      ipcRenderer.on('desktop-lyric:song-update', (event, song) => {
+        updateSongInfo(song)
+      })
+
+      ipcRenderer.on('desktop-lyric:lyric-update', (event, lyrics) => {
+        updateLyrics(lyrics)
+      })
+
+      ipcRenderer.on('desktop-lyric:time-update', (event, time) => {
+        // 使用requestAnimationFrame进行性能优化
+        if (updateRAFId) {
+          cancelAnimationFrame(updateRAFId)
+        }
+        updateRAFId = requestAnimationFrame(() => {
+          updateCurrentTime(time)
+        })
+      })
+
+      ipcRenderer.on('desktop-lyric:settings-update', (event, settings) => {
+        if (settings.fontSize) currentSize = settings.fontSize
+        if (settings.theme) currentTheme = settings.theme
+        if (typeof settings.locked === 'boolean') isLocked = settings.locked
+        
+        updateSize()
+        updateTheme()
+        updateLockState()
+      })
+
+      ipcRenderer.on('desktop-lyric:lock-changed', (event, locked) => {
+        isLocked = locked
+        updateLockState()
+      })
+
+      console.log('桌面歌词窗口已初始化')
+    }
+
+    function updateLockState() {
+      if (isLocked) {
+        container.classList.add('locked')
+        document.body.classList.add('locked')
+      } else {
+        container.classList.remove('locked')
+        document.body.classList.remove('locked')
+      }
+    }
+
+    // 循环切换字体大小
+    function cycleSize() {
+      const sizes = ['small', 'medium', 'large']
+      const currentIndex = sizes.indexOf(currentSize)
+      currentSize = sizes[(currentIndex + 1) % sizes.length]
+      updateSize()
+      ipcRenderer.send('desktop-lyric:size-changed', currentSize)
+    }
+
+    function updateSize() {
+      container.className = container.className.replace(/size-\w+/g, '')
+      container.classList.add(`size-${currentSize}`)
+    }
+
+    // 循环切换主题
+    function cycleTheme() {
+      const themes = ['classic', 'gradient', 'minimal']
+      const currentIndex = themes.indexOf(currentTheme)
+      currentTheme = themes[(currentIndex + 1) % themes.length]
+      updateTheme()
+      ipcRenderer.send('desktop-lyric:theme-changed', currentTheme)
+    }
+
+    function updateTheme() {
+      container.className = container.className.replace(/theme-\w+/g, '')
+      container.classList.add(`theme-${currentTheme}`)
+    }
+
+    // 关闭歌词窗口
+    function closeLyric() {
+      ipcRenderer.send('desktop-lyric:close')
+    }
+
+    // 更新歌曲信息
+    function updateSongInfo(song) {
+      currentSong = song
+      if (song && song.title) {
+        songInfo.textContent = `${song.title} - ${song.artist || '未知歌手'}`
+      } else {
+        songInfo.textContent = '暂无播放'
+      }
+    }
+
+    // 更新歌词
+    function updateLyrics(lyrics) {
+      console.log('桌面歌词接收到数据:', lyrics ? lyrics.length : 0, '行')
+      if (lyrics && lyrics.length > 0) {
+        console.log('前3行歌词:', lyrics.slice(0, 3))
+      }
+      
+      currentLyrics = lyrics || []
+      updateCurrentLyric()
+    }
+
+    // 更新当前时间
+    function updateCurrentTime(time) {
+      // 更严格的防抖：减少更新频率，每50ms最多更新一次（20FPS足够流畅）
+      const now = performance.now()
+      if (now - lastUpdateTime < 50) {
+        return
+      }
+      lastUpdateTime = now
+      
+      currentTime = time
+      updateCurrentLyric()
+    }
+
+    // 检测歌词是否为中文
+    function isChinese(text) {
+      if (!text) return false
+      return /[\u4e00-\u9fff]/.test(text)
+    }
+
+    // 更新当前显示的歌词
+    function updateCurrentLyric() {      
+      if (!currentLyrics || currentLyrics.length === 0) {
+        const fallbackText = currentSong ? '暂无歌词' : '请播放音乐以显示歌词'
+        if (currentLyric.textContent !== fallbackText) {
+          currentLyric.textContent = fallbackText
+          nextLyric.textContent = ''
+        }
+        return
+      }
+
+      let newCurrentIndex = -1
+      let nextIndex = -1
+
+      // 找到当前时间对应的歌词
+      for (let i = 0; i < currentLyrics.length; i++) {
+        if (currentTime >= currentLyrics[i].time) {
+          newCurrentIndex = i
+        } else {
+          nextIndex = i
+          break
+        }
+      }
+
+      let nextText = ''
+
+      if (newCurrentIndex >= 0) {
+        const currentLine = currentLyrics[newCurrentIndex]
+        
+        // 只在歌词行发生变化时才重新渲染DOM结构
+        if (newCurrentIndex !== currentLyricIndex) {
+          console.log('🎵 切换到新歌词行:', newCurrentIndex, currentLine.text)
+          currentLyricIndex = newCurrentIndex
+          
+          // 检查是否是KRC格式（支持卡拉OK效果）
+          if (currentLine.isKrc && currentLine.words && currentLine.words.length > 0) {
+            // 渲染卡拉OK效果DOM结构（只在切换时）
+            renderKaraokeStructure(currentLine)
+          } else {
+            // 普通歌词显示
+            renderNormalLyric(currentLine.text || '♪', currentLine)
+          }
+        } else if (currentLine.isKrc && currentLine.words && currentLine.words.length > 0) {
+          // 同一行歌词，只更新卡拉OK进度（高性能）
+          updateKaraokeProgress(currentLine, currentTime)
+        }
+        
+        // 设置下一行歌词
+        if (nextIndex >= 0) {
+          nextText = currentLyrics[nextIndex].text || ''
+        } else if (currentLine.translation) {
+          nextText = currentLine.translation
+        }
+      } else {
+        if (currentLyric.innerHTML !== '♪') {
+          currentLyric.innerHTML = '♪'
+          currentLyricIndex = -1
+        }
+      }
+      
+      // 只在文本发生变化时更新下一行歌词
+      if (nextLyric.textContent !== nextText) {
+        nextLyric.textContent = nextText
+      }
+    }
+
+    // 渲染卡拉OK DOM结构（只在歌词行变化时调用）
+    function renderKaraokeStructure(lyricLine) {
+      const words = lyricLine.words || []
+      let html = ''
+      
+      console.log('🎵 重建卡拉OK DOM结构:', words.length, '个单词')
+      
+      for (let i = 0; i < words.length; i++) {
+        const word = words[i]
+        const wordText = word.word || word.text
+        
+        // 为每个字符创建span
+        for (let charIndex = 0; charIndex < wordText.length; charIndex++) {
+          const char = wordText[charIndex]
+          
+          if (char === ' ') {
+            html += `<span class="karaoke-char is-space" data-word="${i}" data-char="${charIndex}">&#8203;</span>`
+          } else {
+            html += `<span class="karaoke-char" data-word="${i}" data-char="${charIndex}">${char}</span>`
+          }
+        }
+        
+        // 在单词之间添加空格（对英文歌很重要）
+        if (i < words.length - 1 && !isChinese(wordText)) {
+          html += '<span class="karaoke-char is-space">&#8203;</span>'
+        }
+      }
+      
+      // 只在HTML真正发生变化时才更新DOM
+      if (lastRenderedHTML !== html) {
+        currentLyric.innerHTML = html
+        currentLyric.classList.add('active-line')
+        container.classList.add('lyric-change')
+        setTimeout(() => container.classList.remove('lyric-change'), 300)
+        lastRenderedHTML = html
+        isDOMReady = true
+        
+        // 重置缓存，因为DOM结构已改变
+        cachedCharElements = null
+        karaokeUpdateCache.clear()
+      }
+    }
+
+    // 更新卡拉OK进度（极度优化版本）
+    function updateKaraokeProgress(lyricLine, currentTime) {
+      if (!isDOMReady) return
+      
+      const words = lyricLine.words || []
+      const lineStartTime = lyricLine.time
+      
+      // 缓存字符元素，避免重复查询DOM
+      if (!cachedCharElements || currentLyricIndex !== lastProcessedWordIndex) {
+        cachedCharElements = currentLyric.querySelectorAll('.karaoke-char:not(.is-space)')
+        lastProcessedWordIndex = currentLyricIndex
+      }
+      
+      // 只处理活跃单词附近的字符，而不是全部
+      let globalCharIndex = 0
+      let hasActiveChar = false
+      
+      for (let wordIndex = 0; wordIndex < words.length && !hasActiveChar; wordIndex++) {
+        const word = words[wordIndex]
+        const wordText = word.word || word.text
+        const wordAbsoluteStartTime = lineStartTime + word.startTime
+        const wordAbsoluteEndTime = lineStartTime + word.endTime
+        
+        // 跳过还没开始或已经结束很久的单词
+        if (currentTime < wordAbsoluteStartTime - 500 || currentTime > wordAbsoluteEndTime + 500) {
+          globalCharIndex += wordText.replace(/ /g, '').length
+          continue
+        }
+        
+        for (let charIndex = 0; charIndex < wordText.length; charIndex++) {
+          const char = wordText[charIndex]
+          
+          if (char !== ' ' && globalCharIndex < cachedCharElements.length) {
+            // 计算字符的时间（简单平均分配）
+            const charDuration = word.duration / wordText.length
+            const charStartTime = wordAbsoluteStartTime + (charIndex * charDuration)
+            const charEndTime = charStartTime + charDuration
+            
+            const element = cachedCharElements[globalCharIndex]
+            const cacheKey = `${wordIndex}-${charIndex}`
+            
+            // 计算新状态
+            let newClassName = 'karaoke-char'
+            let fillProgress = 0
+            
+            if (currentTime < charStartTime) {
+              // 还未开始
+              newClassName = 'karaoke-char'
+            } else if (currentTime >= charEndTime) {
+              // 已唱完
+              newClassName = 'karaoke-char sung'
+              fillProgress = 100
+            } else {
+              // 正在唱
+              newClassName = 'karaoke-char singing'
+              const elapsed = currentTime - charStartTime
+              fillProgress = Math.min(100, (elapsed / charDuration) * 100)
+              hasActiveChar = true
+            }
+            
+            // 使用缓存避免重复更新
+            const cachedState = karaokeUpdateCache.get(cacheKey)
+            if (!cachedState || cachedState.className !== newClassName) {
+              element.className = newClassName
+              karaokeUpdateCache.set(cacheKey, { className: newClassName, fillProgress })
+            }
+            
+            // 只为正在唱的字符更新进度（减少90%的CSS更新）
+            if (newClassName.includes('singing') && Math.abs(fillProgress - (cachedState?.fillProgress || 0)) > 5) {
+              element.style.setProperty('--fill-progress', fillProgress + '%')
+              karaokeUpdateCache.set(cacheKey, { className: newClassName, fillProgress })
+            }
+            
+            globalCharIndex++
+          }
+        }
+      }
+    }
+
+    // 渲染普通歌词
+    function renderNormalLyric(text, lyricLine) {
+      const isChineseText = isChinese(text)
+      let displayText = text
+      
+      if (isChineseText) {
+        // 中文歌曲处理
+        if (lyricLine.translation) {
+          // 有翻译时显示原文，翻译在下一行
+          displayText = text
+        }
+      } else {
+        // 非中文歌曲处理
+        displayText = text
+      }
+
+      // 更新显示文本
+      if (currentLyric.textContent !== displayText) {
+        currentLyric.textContent = displayText
+        container.classList.add('lyric-change')
+        setTimeout(() => container.classList.remove('lyric-change'), 500)
+      }
+    }
+
+    // 页面加载完成后初始化
+    document.addEventListener('DOMContentLoaded', init)
+  </script>
+</body>
+</html>

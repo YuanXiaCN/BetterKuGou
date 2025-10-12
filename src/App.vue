@@ -268,8 +268,24 @@ const handleRemoveFromPlaylist = (song) => {
 // 处理搜索歌曲
 const handleSearch = (song) => {
   console.log('搜索歌曲:', song)
-  // TODO: 实现搜索功能
-  alert(`搜索功能开发中...\n歌曲: ${song.name}`)
+  
+  // 构造搜索关键词：优先使用歌曲名，如果没有则使用文件名
+  const songName = song.name || song.filename || song.audio_name || song.songname
+  const artistName = song.singername || (song.singerinfo && song.singerinfo.length > 0 ? song.singerinfo[0].singername : '')
+  
+  // 构造搜索词：歌曲名 + 歌手名
+  let searchKeyword = songName
+  if (artistName) {
+    searchKeyword += ` ${artistName}`
+  }
+  
+  if (searchKeyword.trim()) {
+    // 调用搜索请求处理函数
+    handleSearchRequest(searchKeyword.trim())
+  } else {
+    console.warn('无法构造搜索关键词，歌曲信息不完整')
+    alert('无法搜索：歌曲信息不完整')
+  }
 }
 
 // 处理搜索请求
