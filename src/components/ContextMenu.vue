@@ -15,7 +15,15 @@
         @click="handleItemClick(item)"
       >
         <template v-if="!item.divider">
-          <svg v-if="item.icon" class="menu-icon" viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
+          <!-- 如果是 SVG 文件路径或 data URL，使用 img 标签 -->
+          <img v-if="item.icon && typeof item.icon === 'string' && (item.icon.endsWith('.svg') || item.icon.startsWith('data:image/svg+xml'))" 
+               :src="item.icon" 
+               class="menu-icon" 
+               width="16" 
+               height="16" 
+               alt="" />
+          <!-- 如果是 SVG path 数据，使用原来的方式 -->
+          <svg v-else-if="item.icon" class="menu-icon" viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
             <path :d="item.icon"/>
           </svg>
           <span class="menu-label">{{ item.label }}</span>
@@ -29,6 +37,7 @@
 <script>
 export default {
   name: 'ContextMenu',
+  emits: ['close'],
   props: {
     visible: {
       type: Boolean,
@@ -94,7 +103,7 @@ export default {
     },
     handleClickOutside(event) {
       // 如果点击的是菜单内部，不关闭
-      if (this.$el && this.$el.contains(event.target)) {
+      if (this.$refs.menu && event.target && this.$refs.menu.contains(event.target)) {
         return
       }
       this.$emit('close')
@@ -201,6 +210,15 @@ export default {
 .menu-icon {
   flex-shrink: 0;
   opacity: 0.8;
+  /* 将SVG图标转为单色，然后使用当前文字颜色 */
+  filter: brightness(0) saturate(100%) invert(70%);
+  transition: filter 0.15s ease;
+}
+
+.menu-item:hover .menu-icon {
+  /* 鼠标悬停时使用更亮的颜色 */
+  filter: brightness(0) saturate(100%) invert(100%);
+  opacity: 1;
 }
 
 .menu-label {

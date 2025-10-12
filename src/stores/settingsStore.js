@@ -9,7 +9,8 @@ const baseDefaultSettings = Object.freeze({
   schemaVersion: CURRENT_SCHEMA_VERSION,
   playback: {
     fullscreenLyrics: true,
-    enqueueFullPlaylist: true
+    enqueueFullPlaylist: true,
+    showTranslation: true // 默认显示翻译
   },
   download: {
     downloadPath: '',

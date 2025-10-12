@@ -1,5 +1,15 @@
 // 引入 Electron 模块
-const { app, BrowserWindow, ipcMain, dialog, globalShortcut } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, globalShortcut, shell, Tray, Menu, nativeImage } = require('electron')
+// 解决 Windows 控制台中文/emoji 乱码: 尝试切换到 UTF-8 代码页 (仅开发态且是 win32)
+if (process.platform === 'win32' && !process.env.BK_SKIP_CHCP && !app.isPackaged) {
+  try {
+    const { execSync } = require('child_process')
+    execSync('chcp 65001 >NUL')
+    process.env.BK_CONSOLE_UTF8 = '1'
+  } catch (_) {
+    // 忽略
+  }
+}
 const path = require('path')
 const { spawn } = require('child_process')
 const {
@@ -26,7 +36,199 @@ app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
 
 let mainWindow
 let loadingWindow = null
+let desktopLyricWindow = null
 let backendProcess = null
+let tray = null
+// 当前播放信息(由渲染进程通过 IPC 推送)
+let currentTrack = {
+  title: '暂无播放',
+  cover: null // 可以是文件路径或 dataURL/base64
+}
+let isPlaying = false
+// 桌面歌词与灵动岛歌词
+let desktopLyricEnabled = false
+let islandLyricEnabled = false
+// 若窗口尚未准备好, 暂存需要发送的播放器控制指令
+const pendingPlayerControls = []
+
+function broadcastPlayerControl(action) {
+  const wins = BrowserWindow.getAllWindows().filter(w => !w.isDestroyed())
+  if (wins.length === 0) {
+    pendingPlayerControls.push(action)
+    console.log('🕒 窗口未就绪, 已缓存控制指令:', action)
+    return
+  }
+  console.log('📤 广播播放器控制指令:', action)
+  wins.forEach(w => w.webContents.send('player:control', action))
+}
+
+function resolveIcon(p) {
+  if (!p) return null
+  try {
+    if (p.startsWith('data:')) {
+      return nativeImage.createFromDataURL(p)
+    }
+    return nativeImage.createFromPath(p)
+  } catch (e) {
+    return null
+  }
+}
+
+function getAppTrayIcon() {
+  // 开发与生产路径不同
+  const devIcon = path.join(__dirname, 'logo.png')
+  if (isDev) return devIcon
+  // 生产时放在 resources 根目录或 app.asar.unpacked 内, 这里尝试多个
+  const candidates = [
+    path.join(process.resourcesPath, 'logo.png'),
+    path.join(process.resourcesPath, 'assets/logo.png'),
+    devIcon
+  ]
+  for (const c of candidates) {
+    try { if (require('fs').existsSync(c)) return c } catch (_) {}
+  }
+  return devIcon
+}
+
+function updateTrayMenu() {
+  if (!tray) return
+  const coverImg = resolveIcon(currentTrack.cover) || nativeImage.createFromPath(getAppTrayIcon())
+  // 缩小封面
+  const albumImg = coverImg.isEmpty() ? null : coverImg.resize({ width: 16, height: 16 })
+  const playPauseLabel = isPlaying ? '暂停' : '播放'
+  const desktopLyricLabel = `${desktopLyricEnabled ? '禁用' : '启用'}桌面歌词`
+  const islandLyricLabel = `${islandLyricEnabled ? '禁用' : '启用'}灵动岛歌词`
+
+  const contextMenu = Menu.buildFromTemplate([
+    { label: currentTrack.title, icon: albumImg, enabled: false, tooltip: currentTrack.title },
+    { type: 'separator' },
+    { label: playPauseLabel, click: () => {
+        broadcastPlayerControl(isPlaying ? 'pause' : 'play')
+      }
+    },
+    { label: '上一首', click: () => { broadcastPlayerControl('prev') } },
+    { label: '下一首', click: () => { broadcastPlayerControl('next') } },
+    { type: 'separator' },
+    { label: desktopLyricLabel, click: () => {
+        console.log('🎵 托盘菜单：桌面歌词切换')
+        if (desktopLyricEnabled && desktopLyricWindow && !desktopLyricWindow.isDestroyed()) {
+          console.log('🎵 关闭桌面歌词窗口')
+          desktopLyricWindow.close()
+          desktopLyricEnabled = false
+        } else {
+          console.log('🎵 打开桌面歌词窗口')
+          createDesktopLyricWindow()
+          desktopLyricEnabled = true
+        }
+        updateTrayMenu()
+      }
+    },
+    { label: islandLyricLabel, click: () => {
+        islandLyricEnabled = !islandLyricEnabled
+        updateTrayMenu()
+      }
+    },
+    { type: 'separator' },
+    { label: '显示主界面', click: () => {
+        if (!mainWindow) {
+          createWindow()
+        } else {
+          if (mainWindow.isMinimized()) mainWindow.restore()
+          mainWindow.show(); mainWindow.focus()
+        }
+      }
+    },
+    { label: '退出应用', click: () => { 
+        // 强制退出应用，无视托盘设置
+        app.quit() 
+      } 
+    }
+  ])
+  tray.setContextMenu(contextMenu)
+  tray.setToolTip(`BetterKugou\n${currentTrack.title}${isPlaying ? '' : ' (已暂停)'}`)
+}
+
+function createTray() {
+  if (tray) return tray
+  const iconPath = getAppTrayIcon()
+  tray = new Tray(iconPath)
+  tray.on('click', () => {
+    // 左键单击显示/隐藏窗口
+    if (mainWindow) {
+      if (mainWindow.isVisible()) {
+        mainWindow.hide()
+      } else {
+        if (mainWindow.isMinimized()) mainWindow.restore()
+        mainWindow.show(); mainWindow.focus()
+      }
+    } else {
+      createWindow()
+    }
+  })
+  updateTrayMenu()
+  return tray
+}
+
+// 创建桌面歌词窗口
+function createDesktopLyricWindow() {
+  if (desktopLyricWindow && !desktopLyricWindow.isDestroyed()) {
+    return desktopLyricWindow
+  }
+  
+  console.log('🎵 创建桌面歌词窗口...')
+  
+  desktopLyricWindow = new BrowserWindow({
+    width: 800,
+    height: 200,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: true,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    closable: true,
+    focusable: false, // 防止抢夺焦点
+    show: false, // 创建时先不显示
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+      enableRemoteModule: false
+    }
+  })
+
+  // 加载桌面歌词HTML文件
+  const desktopLyricPath = path.join(__dirname, 'desktopLyric.html')
+  desktopLyricWindow.loadFile(desktopLyricPath)
+
+  // 窗口事件处理
+  desktopLyricWindow.on('closed', () => {
+    console.log('🎵 桌面歌词窗口已关闭')
+    desktopLyricWindow = null
+    desktopLyricEnabled = false
+    updateTrayMenu()
+  })
+
+  desktopLyricWindow.on('ready-to-show', () => {
+    console.log('🎵 桌面歌词窗口准备就绪')
+    desktopLyricWindow.show()
+    // 发送当前歌曲信息和歌词数据
+    if (currentTrack.title !== '暂无播放') {
+      desktopLyricWindow.webContents.send('desktop-lyric:song-update', currentTrack)
+    }
+  })
+
+  // 开发环境下打开调试工具
+  if (isDev) {
+    desktopLyricWindow.webContents.openDevTools()
+  }
+
+  desktopLyricEnabled = true
+  updateTrayMenu()
+  
+  return desktopLyricWindow
+}
 // 存储已注册的全局快捷键映射: accelerator -> action
 const registeredShortcuts = new Map()
 // 内存清理定时器
@@ -432,8 +634,10 @@ function createWindow() {
   updateLoadingProgress(75, '正在加载前端界面...', 'frontend')
   
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 1280,
+    height: 720,
+    minWidth: 1024,
+    minHeight: 480,
     frame: false,
     show: false, // 先不显示,等加载完成后再显示
     webPreferences: {
@@ -463,6 +667,15 @@ function createWindow() {
   // 页面加载完成后的处理
   mainWindow.webContents.on('did-finish-load', () => {
     updateLoadingProgress(90, '准备就绪', 'login')
+    // 冲刷之前缓存的播放器控制指令
+    if (pendingPlayerControls.length) {
+      console.log('🚀 发送缓存的播放器控制指令: ', pendingPlayerControls)
+      pendingPlayerControls.splice(0).forEach(action => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('player:control', action)
+        }
+      })
+    }
     
     // 立即显示主窗口并关闭加载窗口
     setTimeout(() => {
@@ -483,6 +696,19 @@ function createWindow() {
   }
 
   // 窗口关闭时的处理
+  mainWindow.on('close', (event) => {
+    // 检查设置，决定是隐藏到托盘还是真正关闭
+    const settings = getSettings()
+    if (settings.software?.minimizeToTray) {
+      // 阻止默认关闭行为
+      event.preventDefault()
+      // 隐藏窗口到托盘
+      mainWindow.hide()
+      console.log('🔽 应用已最小化到系统托盘')
+    }
+    // 如果设置为false，则允许正常关闭
+  })
+  
   mainWindow.on('closed', () => {
     mainWindow = null
   })
@@ -493,6 +719,8 @@ app.whenReady().then(async () => {
   // 首先创建加载窗口
   createLoadingWindow()
   updateLoadingProgress(5, '正在初始化...', 'backend')
+  // 创建系统托盘
+  createTray()
   
   try {
     await initSettingsStore(app)
@@ -539,7 +767,18 @@ ipcMain.on('window-unmaximize', () => {
 })
 ipcMain.on('window-close', () => {
   const win = BrowserWindow.getFocusedWindow()
-  if (win) win.close()
+  if (win) {
+    // 检查设置，决定是隐藏到托盘还是真正关闭
+    const settings = getSettings()
+    if (settings.software?.minimizeToTray) {
+      // 隐藏窗口到托盘
+      win.hide()
+      console.log('🔽 应用已最小化到系统托盘')
+    } else {
+      // 正常关闭
+      win.close()
+    }
+  }
 })
 
 // 设置相关 IPC 事件
@@ -701,6 +940,71 @@ ipcMain.handle('shortcut:test', async (_event, accelerator) => {
   }
 })
 
+// 外部链接打开处理器
+ipcMain.handle('open-external', async (_event, url) => {
+  try {
+    console.log(`🌐 打开外部链接: ${url}`)
+    await shell.openExternal(url)
+    return { success: true }
+  } catch (error) {
+    console.error('❌ 打开外部链接失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+// 桌面歌词相关 IPC 事件处理
+ipcMain.handle('desktop-lyric:toggle', async () => {
+  try {
+    console.log('🎵 桌面歌词切换操作...')
+    if (desktopLyricEnabled && desktopLyricWindow && !desktopLyricWindow.isDestroyed()) {
+      console.log('🎵 关闭桌面歌词窗口')
+      desktopLyricWindow.close()
+      desktopLyricEnabled = false
+    } else {
+      console.log('🎵 打开桌面歌词窗口')
+      createDesktopLyricWindow()
+      desktopLyricEnabled = true
+    }
+    updateTrayMenu()
+    return desktopLyricEnabled
+  } catch (error) {
+    console.error('❌ 桌面歌词切换失败:', error)
+    return false
+  }
+})
+
+ipcMain.handle('desktop-lyric:show', async () => {
+  try {
+    console.log('🎵 显示桌面歌词')
+    if (!desktopLyricWindow || desktopLyricWindow.isDestroyed()) {
+      createDesktopLyricWindow()
+    } else {
+      desktopLyricWindow.show()
+    }
+    desktopLyricEnabled = true
+    updateTrayMenu()
+    return true
+  } catch (error) {
+    console.error('❌ 显示桌面歌词失败:', error)
+    return false
+  }
+})
+
+ipcMain.handle('desktop-lyric:hide', async () => {
+  try {
+    console.log('🎵 隐藏桌面歌词')
+    if (desktopLyricWindow && !desktopLyricWindow.isDestroyed()) {
+      desktopLyricWindow.close()
+    }
+    desktopLyricEnabled = false
+    updateTrayMenu()
+    return true
+  } catch (error) {
+    console.error('❌ 隐藏桌面歌词失败:', error)
+    return false
+  }
+})
+
 // 当所有窗口都关闭时退出应用
 app.on('window-all-closed', () => {
   // 注销所有全局快捷键
@@ -711,8 +1015,19 @@ app.on('window-all-closed', () => {
   // 停止内存清理定时器
   stopMemoryCleanup()
   
+  // 关闭桌面歌词窗口
+  if (desktopLyricWindow && !desktopLyricWindow.isDestroyed()) {
+    console.log('🗑️  关闭桌面歌词窗口...')
+    desktopLyricWindow.close()
+    desktopLyricWindow = null
+  }
+  
   // 关闭后端服务器
   stopBackendServer()
+  if (tray) {
+    try { tray.destroy() } catch (_) {}
+    tray = null
+  }
   
   // 在 macOS 上，除非用户明确退出，否则应用及其菜单栏会保持活动状态
   if (process.platform !== 'darwin') {
@@ -730,7 +1045,18 @@ app.on('before-quit', () => {
   // 停止内存清理定时器
   stopMemoryCleanup()
   
+  // 关闭桌面歌词窗口
+  if (desktopLyricWindow && !desktopLyricWindow.isDestroyed()) {
+    console.log('🗑️  应用退出前关闭桌面歌词窗口...')
+    desktopLyricWindow.close()
+    desktopLyricWindow = null
+  }
+  
   stopBackendServer()
+  if (tray) {
+    try { tray.destroy() } catch (_) {}
+    tray = null
+  }
 })
 
 // 应用失去焦点时的处理(可选,用于调试)
@@ -740,4 +1066,65 @@ app.on('browser-window-blur', () => {
 
 app.on('browser-window-focus', () => {
   console.log('📳 应用获得焦点')
+})
+
+// ============ 播放器相关 IPC (供渲染进程调用) ============
+// 更新当前歌曲信息: { title, cover }
+ipcMain.on('player:track-update', (_event, payload) => {
+  if (payload && typeof payload === 'object') {
+    if (typeof payload.title === 'string') currentTrack.title = payload.title || '未知歌曲'
+    if (payload.cover) currentTrack.cover = payload.cover
+    if (typeof payload.artist === 'string') currentTrack.artist = payload.artist
+    updateTrayMenu()
+    
+    // 转发歌曲信息到桌面歌词窗口
+    if (desktopLyricWindow && !desktopLyricWindow.isDestroyed()) {
+      console.log('🎵 转发歌曲信息到桌面歌词:', payload)
+      desktopLyricWindow.webContents.send('desktop-lyric:song-update', payload)
+    }
+  }
+})
+
+// 更新播放状态: playing | paused
+ipcMain.on('player:playback-state', (_event, state) => {
+  isPlaying = state === 'playing'
+  updateTrayMenu()
+})
+
+// 接收并转发歌词数据
+ipcMain.on('player:lyric-update', (_event, lyrics) => {
+  console.log('📡 主进程接收到歌词数据:', lyrics ? lyrics.length : 0, '行')
+  if (desktopLyricWindow && !desktopLyricWindow.isDestroyed()) {
+    console.log('🎵 转发歌词数据到桌面歌词窗口')
+    desktopLyricWindow.webContents.send('desktop-lyric:lyric-update', lyrics)
+  }
+})
+
+// 接收并转发播放时间
+ipcMain.on('player:time-update', (_event, time) => {
+  if (desktopLyricWindow && !desktopLyricWindow.isDestroyed()) {
+    // 减少日志频率，避免刷屏
+    if (typeof time === 'number' && Math.floor(time / 1000) % 5 === 0) {
+      console.log('⏱️ 转发播放时间到桌面歌词:', Math.floor(time / 1000) + 's')
+    }
+    desktopLyricWindow.webContents.send('desktop-lyric:time-update', time)
+  }
+})
+
+// 桌面歌词窗口内部事件处理
+ipcMain.on('desktop-lyric:close', () => {
+  console.log('🎵 桌面歌词请求关闭')
+  if (desktopLyricWindow && !desktopLyricWindow.isDestroyed()) {
+    desktopLyricWindow.close()
+  }
+})
+
+ipcMain.on('desktop-lyric:size-changed', (_event, size) => {
+  console.log('🎵 桌面歌词字体大小变更:', size)
+  // 这里可以保存到设置中
+})
+
+ipcMain.on('desktop-lyric:theme-changed', (_event, theme) => {
+  console.log('🎵 桌面歌词主题变更:', theme)
+  // 这里可以保存到设置中
 })

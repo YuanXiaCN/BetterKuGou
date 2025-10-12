@@ -17,6 +17,7 @@
         <div class="sidebar-logo">
           <img src="/logo.png" alt="BetterKugou Logo">
           <span>BetterKugou</span>
+          <div class="version-info">v{{ appVersion }}</div>
         </div>
       </aside>
 
@@ -311,6 +312,16 @@
           </div>
           <div class="setting-item">
             <div class="setting-info">
+              <div class="setting-label">点击关闭按钮时，将应用驻留至托盘</div>
+              <div class="setting-desc">启用后，点击关闭按钮不会退出程序，而是将应用最小化到系统托盘</div>
+            </div>
+            <label class="setting-switch">
+              <input type="checkbox" v-model="localSettings.software.minimizeToTray">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="setting-item">
+            <div class="setting-info">
               <div class="setting-label">打开软件时恢复上一次的播放列表和播放位置</div>
               <div class="setting-desc">保存并还原上一次的播放队列和播放进度</div>
             </div>
@@ -353,9 +364,9 @@
           </div>
           <div class="setting-item setting-item--actions">
             <button class="outline-btn" type="button">检查更新</button>
-            <button class="outline-btn" type="button">反馈 / 建议</button>
-            <button class="outline-btn" type="button">使用协议</button>
-            <button class="outline-btn" type="button">项目主页（真的不给个Star嘛）</button>
+            <button class="outline-btn" type="button" @click="openFeedbackUrl">反馈 / 建议</button>
+            <button class="outline-btn" type="button" @click="openLicenseUrl">使用协议</button>
+            <button class="outline-btn" type="button" @click="openProjectUrl">项目主页（真的不给个Star嘛）</button>
           </div>
           <div class="setting-item setting-item--center">
             <img class="software-logo" src="/logo.png" alt="BetterKugou Logo">
@@ -372,6 +383,9 @@ import { useSettingsStore } from '../stores/settingsStore.js'
 import { cloneDeep, replaceReactive } from '../utils/objectUtils.js'
 
 const emit = defineEmits(['close', 'settings-changed'])
+
+// 从 package.json 获取版本信息
+const appVersion = ref('0.1.4-alpha-pre1')
 
 const sections = [
   { id: 'playback', label: '播放设置' },
@@ -800,6 +814,34 @@ function teardownScrollTracking() {
   scrollContainer = null
 }
 
+// URL 跳转处理函数
+function openFeedbackUrl() {
+  const url = 'https://github.com/YuanXiaCN/BetterKuGou/issues'
+  if (window.electronAPI?.openExternal) {
+    window.electronAPI.openExternal(url)
+  } else {
+    window.open(url, '_blank')
+  }
+}
+
+function openProjectUrl() {
+  const url = 'https://github.com/YuanXiaCN/BetterKuGou'
+  if (window.electronAPI?.openExternal) {
+    window.electronAPI.openExternal(url)
+  } else {
+    window.open(url, '_blank')
+  }
+}
+
+function openLicenseUrl() {
+  const url = 'https://github.com/YuanXiaCN/BetterKuGou?tab=License-1-ov-file'
+  if (window.electronAPI?.openExternal) {
+    window.electronAPI.openExternal(url)
+  } else {
+    window.open(url, '_blank')
+  }
+}
+
 onMounted(() => {
   nextTick(() => {
     setupScrollTracking()
@@ -980,6 +1022,16 @@ defineExpose({
   color: var(--color-text-secondary);
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.version-info {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  padding: var(--spacing-xs) var(--spacing-sm);
+
+  border-radius: var(--radius-sm);
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.05em;
 }
 
 .settings-main {

@@ -1,5 +1,5 @@
 <template>
-  <div class="music-player" v-if="currentSong" :class="{ 'player-style-netease': playerStyle === 'netease' }">
+  <div class="music-player" :class="{ 'player-style-netease': playerStyle === 'netease' }">
     <!-- 默认样式：进度条在顶部 -->
     <div v-if="playerStyle !== 'netease'" class="progress-bar-container">
       <input 
@@ -15,7 +15,7 @@
     </div>
 
     <!-- 播放器主体 -->
-    <div class="player-main" :class="{ 'isPlaying': isPlaying }">
+    <div class="player-main" :class="{ 'isPlaying': isPlaying }" v-if="currentSong">
       <!-- 左侧：歌曲信息 -->
       <div class="song-info-section">
         <img 
@@ -204,11 +204,13 @@
         :visible="showLyricView"
         :song="currentSong"
         :lyrics="currentLyrics"
+        :lyric-data="currentLyricData"
         :current-play-time="currentTime"
         :duration="duration"
         :is-playing="isPlaying"
         :play-mode="playMode"
         :is-favorite="isFavorite"
+        :pause-updates="isSwitchingSong"
         @close="closeLyrics"
         @toggle-play="togglePlay"
         @previous="playPrevious"
@@ -302,13 +304,19 @@ export default {
       // 歌词相关
       showLyricView: false, // 是否显示歌词界面
       currentLyrics: '', // 当前歌词内容
+      currentLyricData: null, // 完整的歌词数据（包含翻译等信息）
       // MediaSession 相关
       lastPositionUpdate: null, // 上次位置更新的时间（秒）
+      lastDesktopTimeUpdate: null, // 上次桌面歌词时间更新的时间戳（毫秒）
       // 切歌控制
       isSwitchingSong: false, // 是否正在切歌（防止并发）
+      isLoadingSong: false, // 是否正在加载歌曲（防止重复加载）
+      isComponentReady: false, // 组件是否完全准备就绪
       switchSongDebounceTimer: null, // 切歌防抖定时器
       // RAF 循环
-      rafId: null // requestAnimationFrame ID
+      rafId: null, // requestAnimationFrame ID
+      // 系统托盘控制
+      trayControlUnsubscribe: null // 系统托盘控制监听器取消订阅函数
     }
   },
   computed: {
@@ -328,17 +336,17 @@ export default {
       return [
         {
           label: '单曲循环',
-          icon: 'M196 256h-48c-4.4 0-8 3.6-8 8v456c0 4.4 3.6 8 8 8h48c4.4 0 8-3.6 8-8V264c0-4.4-3.6-8-8-8z M792 256h-48c-4.4 0-8 3.6-8 8v456c0 4.4 3.6 8 8 8h48c4.4 0 8-3.6 8-8V264c0-4.4-3.6-8-8-8z',
+          icon: this.repeatOneIcon,
           action: () => this.setPlayMode('single')
         },
         {
           label: '列表循环',
-          icon: 'M758.2 839.1C851.8 765.9 912 651.9 912 523.9 912 303 733.5 124.3 512.6 124 291.4 123.7 112 302.8 112 524c0 125.2 57.5 236.9 147.6 310.2 3.5 2.8 8.6 2.2 11.4-1.3l39.4-50.5c2.7-3.4 2.1-8.3-1.2-11.1-8.1-6.6-15.9-13.7-23.4-21.2a318.64 318.64 0 01-68.6-101.7C200.4 609 192 567.1 192 523.9s8.4-85.1 25.1-124.5c16.1-38.1 39.2-72.3 68.6-101.7 29.4-29.4 63.6-52.5 101.7-68.6C426.9 212.4 468.8 204 512 204s85.1 8.4 124.5 25.1c38.1 16.1 72.3 39.2 101.7 68.6 29.4 29.4 52.5 63.6 68.6 101.7 16.7 39.4 25.1 81.3 25.1 124.5s-8.4 85.1-25.1 124.5a318.64 318.64 0 01-68.6 101.7c-9.3 9.3-19.1 18-29.3 26L668.2 724a8 8 0 00-14.1 3l-39.6 162.2c-1.2 5 2.6 9.9 7.7 9.9l167.3-4.3c5.3-.1 8.8-5.3 6.8-10.2l-36.1-146.8z',
+          icon: this.repeatAllIcon,
           action: () => this.setPlayMode('loop')
         },
         {
           label: '随机播放',
-          icon: 'M568 424h144c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H568c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm0 248h144c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H568c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-184-24c9.9 0 19.6-2.2 28.5-6.4L459 731.2c2.1 0.9 4.5 0.8 6.4-0.4 2-1.2 3.3-3.3 3.3-5.6v-76.5l119.4 89.6c6.6 5 14.9 7.7 23.4 7.7 20.7 0 37.5-16.8 37.5-37.5V316.5c0-20.7-16.8-37.5-37.5-37.5-8.5 0-16.8 2.7-23.4 7.7L468.6 376v-76.5c0-2.3-1.3-4.4-3.3-5.6-1.9-1.2-4.3-1.3-6.4-0.4l-46.5 23.6c-8.9-4.2-18.6-6.4-28.5-6.4-35.3 0-64 28.7-64 64v272c0 35.3 28.7 64 64 64z',
+          icon: this.shuffleIcon,
           action: () => this.setPlayMode('shuffle')
         }
       ]
@@ -350,16 +358,44 @@ export default {
         if (newSong) {
           // 如果新歌曲与当前播放的歌曲相同，不重新加载
           if (this.currentSong && this.currentSong.hash === newSong.hash) {
-            console.log('歌曲相同，跳过重复加载:', newSong.name || newSong.filename)
+            console.log('🎵 [外部Song] 歌曲相同，跳过重复加载:', newSong.name || newSong.filename)
             return
           }
           // 检查是否正在切歌中，避免冲突
           if (this.isSwitchingSong) {
-            console.log('正在切歌中，忽略外部 song prop 变化')
+            console.log('🎵 [外部Song] 正在切歌中，忽略外部 song prop 变化')
             return
           }
-          console.log('外部传入新歌曲，加载:', newSong.name || newSong.filename)
-          this.currentSong = newSong
+          // 检查是否正在加载歌曲，避免重复加载
+          if (this.isLoadingSong) {
+            console.log('🎵 [外部Song] 正在加载歌曲中，忽略外部 song prop 变化')
+            return
+          }
+          
+          // 检查组件是否准备就绪
+          if (!this.isComponentReady) {
+            console.log('🎵 [外部Song] 组件尚未准备就绪，延迟加载歌曲:', newSong.name || newSong.filename)
+            // 等待组件准备就绪后重试
+            const checkReady = () => {
+              if (this.isComponentReady && this.$refs.audioPlayer) {
+                console.log('🎵 [外部Song] 组件已准备就绪，开始加载延迟的歌曲')
+                this.loadSong(newSong)
+              } else {
+                setTimeout(checkReady, 100)
+              }
+            }
+            checkReady()
+            return
+          }
+          
+          console.log('🎵 [外部Song] 外部传入新歌曲，加载:', newSong.name || newSong.filename, {
+            isSwitchingSong: this.isSwitchingSong,
+            isLoadingSong: this.isLoadingSong,
+            isComponentReady: this.isComponentReady,
+            currentSongHash: this.currentSong?.hash,
+            newSongHash: newSong.hash
+          })
+          // 不在这里设置 currentSong，让 loadSong 方法来处理
           this.loadSong(newSong)
         }
       },
@@ -367,21 +403,64 @@ export default {
     },
     // 监听播放列表变化
     playlist: {
-      handler(newPlaylist) {
-        console.log('播放列表更新:', newPlaylist.length, '首歌曲')
-        // 播放列表变化时不重置历史记录,只确保 currentIndex 在有效范围内
-        if (this.currentIndex >= newPlaylist.length) {
-          this.currentIndex = Math.max(0, newPlaylist.length - 1)
-          console.log('调整 currentIndex 到有效范围:', this.currentIndex)
-        }
-        
-        // 如果在随机播放模式下，重新生成随机播放列表
-        if (this.playMode === 'shuffle' && newPlaylist.length > 0) {
-          this.generateShuffledPlaylist()
-          console.log('播放列表变化，重新生成随机播放列表')
+      handler(newPlaylist, oldPlaylist) {
+        try {
+          if (!Array.isArray(newPlaylist)) {
+            console.error('播放列表不是数组:', newPlaylist)
+            return
+          }
+          
+          // 只在开发环境输出详细日志
+          if (process.env.NODE_ENV === 'development') {
+            console.log('播放列表更新:', newPlaylist.length, '首歌曲')
+          }
+          
+          // 如果播放列表被完全清空，重置相关状态
+          if (newPlaylist.length === 0) {
+            this.currentIndex = 0
+            this.playedHistory = []
+            this.shuffledPlaylist = []
+            // 安全地停止当前播放并清理音频状态
+            if (this.$refs.audioPlayer) {
+              this.$refs.audioPlayer.pause()
+              this.$refs.audioPlayer.currentTime = 0
+            }
+            this.isPlaying = false
+            this.currentTime = 0
+            this.duration = 0
+            if (process.env.NODE_ENV === 'development') {
+              console.log('播放列表已清空，重置状态')
+            }
+            return
+          }
+          
+          // 优化：只有在长度发生变化时才重新计算索引
+          const oldLength = oldPlaylist ? oldPlaylist.length : 0
+          if (oldLength !== newPlaylist.length) {
+            // 播放列表变化时不重置历史记录,只确保 currentIndex 在有效范围内
+            if (this.currentIndex >= newPlaylist.length) {
+              this.currentIndex = Math.max(0, newPlaylist.length - 1)
+              if (process.env.NODE_ENV === 'development') {
+                console.log('调整 currentIndex 到有效范围:', this.currentIndex)
+              }
+            }
+            
+            // 如果在随机播放模式下，重新生成随机播放列表
+            if (this.playMode === 'shuffle' && newPlaylist.length > 0) {
+              // 使用 nextTick 异步处理，避免阻塞UI
+              this.$nextTick(() => {
+                this.generateShuffledPlaylist()
+                if (process.env.NODE_ENV === 'development') {
+                  console.log('播放列表变化，重新生成随机播放列表')
+                }
+              })
+            }
+          }
+        } catch (error) {
+          console.error('处理播放列表变化时出错:', error)
         }
       },
-      deep: true
+      deep: false // 改为浅比较，提高性能
     },
     // 监听当前播放索引变化，记录播放顺序
     currentIndex: {
@@ -408,64 +487,176 @@ export default {
           this.historyPointer = -1
         }
         
-        // 注意：不在这里触发 loadSong，由 playNext/playPrevious 等方法直接调用
-        // 只在索引改变后通知父组件（但不触发重复加载）
-        if (newIndex !== -1 && this.playlist[newIndex] && !this.isSwitchingSong) {
-          this.$emit('song-changed', this.playlist[newIndex])
-        }
+        // 注意：不在这里通知父组件，避免与 loadSong 中的通知重复触发
+        // 父组件同步由 loadSong 成功后统一通过 'song-changed' 事件进行
       }
+    },
+    // 监听当前歌曲变化，同步到系统托盘
+    currentSong: {
+      handler(newSong) {
+        if (newSong && window.electronAPI && window.electronAPI.updateTrack) {
+          const trackInfo = {
+            title: newSong.name || newSong.filename || '未知歌曲',
+            cover: newSong.cover ? newSong.cover.replace('{size}', '400') : null
+          }
+          window.electronAPI.updateTrack(trackInfo)
+        }
+      },
+      immediate: true
     }
   },
   mounted() {
-    // 从 localStorage 恢复音量和播放模式
-    const savedVolume = localStorage.getItem('player_volume')
-    if (savedVolume) {
-      this.volume = parseInt(savedVolume)
-      this.$refs.audioPlayer.volume = this.volume / 100
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🎵 [MusicPlayer] 组件已挂载')
+      console.log('🎵 [MusicPlayer] audioPlayer ref 状态:', !!this.$refs.audioPlayer)
     }
     
-    const savedMode = localStorage.getItem('player_mode')
-    if (savedMode && ['loop', 'single', 'shuffle'].includes(savedMode)) {
-      this.playMode = savedMode
-    }
-    
-    // 初始化系统媒体控制
-    this.initMediaSessionHandlers()
-    
-    // 启动 RAF 循环进行高频时间更新
-    this.startTimeUpdate()
+    // 添加全局错误处理
+    this.$nextTick(() => {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🎵 [MusicPlayer] nextTick 后 audioPlayer ref 状态:', !!this.$refs.audioPlayer)
+      }
+      
+      // 标记组件为已准备就绪
+      this.isComponentReady = true
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🎵 [MusicPlayer] 组件已准备就绪')
+      }
+      try {
+        // 从 localStorage 恢复音量和播放模式
+        const savedVolume = localStorage.getItem('player_volume')
+        if (savedVolume) {
+          this.volume = parseInt(savedVolume)
+          if (this.$refs.audioPlayer) {
+            this.$refs.audioPlayer.volume = this.volume / 100
+          }
+        }
+        
+        const savedMode = localStorage.getItem('player_mode')
+        if (savedMode && ['loop', 'single', 'shuffle'].includes(savedMode)) {
+          this.playMode = savedMode
+        }
+        
+        // 初始化系统媒体控制
+        this.initMediaSessionHandlers()
+        
+        // 监听来自系统托盘的播放器控制事件
+        this.initTrayPlayerControlListener()
+        
+        // 启动 RAF 循环进行高频时间更新
+        this.startTimeUpdate()
+      } catch (error) {
+        console.error('MusicPlayer mounted 初始化错误:', error)
+      }
+    })
   },
   beforeUnmount() {
     // 组件销毁前停止 RAF 循环
     this.stopTimeUpdate()
+    
+    // 清理音频元素
+    if (this.$refs.audioPlayer) {
+      this.$refs.audioPlayer.pause()
+      this.$refs.audioPlayer.src = ''
+    }
+    
+    // 清理定时器
+    if (this.switchSongDebounceTimer) {
+      clearTimeout(this.switchSongDebounceTimer)
+    }
+    
+    // 清理系统托盘控制监听器
+    if (this.trayControlUnsubscribe) {
+      this.trayControlUnsubscribe()
+      this.trayControlUnsubscribe = null
+    }
   },
   methods: {
     // 加载歌曲
     async loadSong(song) {
+      // 防止重复加载 - 更严格的检查
+      if (this.isLoadingSong) {
+        console.log('🎵 [LoadSong] 正在加载中，忽略重复请求')
+        return false
+      }
+      
+      // 检查组件是否已挂载 - 增强重试机制
+      if (!this.$refs.audioPlayer) {
+        console.log('🎵 [LoadSong] 组件未完全挂载，尝试重试机制')
+        
+        // 多次重试，每次间隔更长
+        const maxRetries = 5
+        for (let i = 0; i < maxRetries; i++) {
+          await new Promise(resolve => setTimeout(resolve, (i + 1) * 100)) // 100ms, 200ms, 300ms...
+          await this.$nextTick()
+          
+          if (this.$refs.audioPlayer) {
+            console.log(`🎵 [LoadSong] 第 ${i + 1} 次重试成功，音频元素已准备就绪`)
+            break
+          }
+          
+          if (i === maxRetries - 1) {
+            console.error('🎵 [LoadSong] 所有重试均失败，音频元素不可用')
+            this.isLoadingSong = false
+            return false
+          }
+        }
+      }
+      
+      // 如果传入的歌曲与当前歌曲相同，不重复加载
+      if (this.currentSong && song && this.currentSong.hash === song.hash) {
+        console.log('🎵 [LoadSong] 歌曲已加载，跳过重复请求:', song.name || song.filename)
+        return true // 返回 true 因为歌曲已经加载
+      }
+      
+      // 设置加载状态
+      this.isLoadingSong = true
+      
+      // 性能监控：记录切歌开始时间
+      const loadStartTime = performance.now()
+      
       // 保存当前播放的歌曲作为备份
       const previousSong = this.currentSong
       const wasPlaying = this.isPlaying
       
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🎵 [LoadSong] 开始加载歌曲:', {
+          songName: song.name || song.filename,
+          songHash: song.hash,
+          previousSong: previousSong?.name || previousSong?.filename,
+          previousSongHash: previousSong?.hash,
+          wasPlaying,
+          currentIndex: this.currentIndex,
+          isSwitchingSong: this.isSwitchingSong,
+          showLyricView: this.showLyricView
+        })
+      }
+      
       try {
-        console.log('开始加载歌曲:', song)
         
         // 第一步：获取歌曲详细信息（如果需要）
         let audioDetail = song
         if (!song.album_audio_id || song.album_audio_id === 0) {
-          console.log('获取歌曲详情...')
+          if (process.env.NODE_ENV === 'development') {
+            console.log('获取歌曲详情...')
+          }
           const detailResponse = await getSongDetail(song.hash)
-          console.log('歌曲详情响应:', detailResponse)
+          if (process.env.NODE_ENV === 'development') {
+            console.log('歌曲详情响应:', detailResponse)
+          }
           
           if (detailResponse && detailResponse.status === 1 && detailResponse.data && detailResponse.data.length > 0) {
             audioDetail = { ...song, ...detailResponse.data[0] }
-            console.log('合并后的歌曲信息:', audioDetail)
-            console.log('歌手信息字段检查:', {
-              'singerinfo': audioDetail.singerinfo,
-              'singername': audioDetail.singername,
-              'author_name': audioDetail.author_name,
-              'singer_name': audioDetail.singer_name,
-              'filename': audioDetail.filename
-            })
+            if (process.env.NODE_ENV === 'development') {
+              console.log('合并后的歌曲信息:', audioDetail)
+              console.log('歌手信息字段检查:', {
+                'singerinfo': audioDetail.singerinfo,
+                'singername': audioDetail.singername,
+                'author_name': audioDetail.author_name,
+                'singer_name': audioDetail.singer_name,
+                'filename': audioDetail.filename
+              })
+            }
           }
         }
         
@@ -476,7 +667,9 @@ export default {
           audioDetail.album_audio_id || 0
         )
         
-        console.log('播放地址响应状态:', urlResponse.status)
+        if (process.env.NODE_ENV === 'development') {
+          console.log('播放地址响应状态:', urlResponse.status)
+        }
         
         // 检查响应状态
         if (urlResponse && urlResponse.status === 1) {
@@ -485,32 +678,73 @@ export default {
           // 参考 BetterKugou：response.url 是一个数组，取第一个元素
           if (urlResponse.url && Array.isArray(urlResponse.url) && urlResponse.url.length > 0) {
             playUrl = urlResponse.url[0]  // 重要：取数组第一个元素
-            console.log('获取播放URL:', playUrl)
+            if (process.env.NODE_ENV === 'development') {
+              console.log('获取播放URL:', playUrl)
+            }
             
             // 如果是 http，转换为 https（提高安全性）
             if (playUrl && playUrl.startsWith('http://')) {
               playUrl = playUrl.replace('http://', 'https://')
-              console.log('转换为HTTPS')
+              if (process.env.NODE_ENV === 'development') {
+                console.log('转换为HTTPS')
+              }
             }
           }
           // 备用：直接字符串格式
           else if (urlResponse.url && typeof urlResponse.url === 'string') {
             playUrl = urlResponse.url
-            console.log('获取播放URL (字符串):', playUrl)
+            if (process.env.NODE_ENV === 'development') {
+              console.log('获取播放URL (字符串):', playUrl)
+            }
           }
           
           if (playUrl && typeof playUrl === 'string') {
-            console.log('🎵 设置音频源')
+            if (process.env.NODE_ENV === 'development') {
+              console.log('🎵 [LoadSong] 设置音频源:', playUrl)
+              console.log('🎵 [LoadSong] 更新 currentSong 前:', {
+                oldCurrentSong: this.currentSong?.name || this.currentSong?.filename,
+                oldCurrentSongHash: this.currentSong?.hash,
+                newSong: song.name || song.filename,
+                newSongHash: song.hash
+              })
+            }
+            
             const audioEl = this.$refs.audioPlayer
+            if (!audioEl) {
+              console.error('🎵 [LoadSong] 音频元素不存在，组件可能未完全挂载')
+              // 清除加载状态
+              this.isLoadingSong = false
+              return false
+            }
             audioEl.src = playUrl
             
             // 只在成功获取播放地址后才更新 currentSong
-            this.currentSong = song
+            // 添加检查，避免与当前歌曲重复赋值
+            if (!this.currentSong || this.currentSong.hash !== song.hash) {
+              if (process.env.NODE_ENV === 'development') {
+                console.log('🎵 [LoadSong] 更新 currentSong 前:', {
+                  oldCurrentSong: this.currentSong?.name || this.currentSong?.filename,
+                  oldCurrentSongHash: this.currentSong?.hash,
+                  newSong: song.name || song.filename,
+                  newSongHash: song.hash
+                })
+              }
+              this.currentSong = song
+            }
+            
+            if (process.env.NODE_ENV === 'development') {
+              console.log('🎵 [LoadSong] 更新 currentSong 后:', {
+                currentSong: this.currentSong?.name || this.currentSong?.filename,
+                currentSongHash: this.currentSong?.hash
+              })
+            }
             
             // 自动播放
             try {
               await audioEl.play()
-              console.log('播放成功')
+              if (process.env.NODE_ENV === 'development') {
+                console.log('🎵 [LoadSong] 播放成功')
+              }
               
               // 设置系统媒体会话信息 (SMTC)
               this.updateMediaSession(audioDetail)
@@ -525,13 +759,17 @@ export default {
               
               // 加载歌词（不阻塞，失败也不影响播放）
               this.loadLyric(song).catch(err => {
-                console.warn('歌词加载失败，但不影响播放:', err.message)
+                if (process.env.NODE_ENV === 'development') {
+                  console.warn('歌词加载失败，但不影响播放:', err.message)
+                }
               })
             } catch (playError) {
               console.error('播放失败:', playError.message)
               this.showError(`播放失败: ${playError.message}`)
               // 恢复之前的歌曲
               this.currentSong = previousSong
+              // 清除加载状态
+              this.isLoadingSong = false
               return false
             }
           } else {
@@ -539,6 +777,8 @@ export default {
             this.showError('播放地址格式错误，跳过该歌曲')
             // 恢复之前的歌曲
             this.currentSong = previousSong
+            // 清除加载状态
+            this.isLoadingSong = false
             return false
           }
         } else {
@@ -547,15 +787,51 @@ export default {
           this.showError(errorMsg)
           // 恢复之前的歌曲
           this.currentSong = previousSong
+          // 清除加载状态
+          this.isLoadingSong = false
           return false
         }
         
+        // 性能监控：记录加载完成时间
+        const loadEndTime = performance.now()
+        const loadDuration = loadEndTime - loadStartTime
+        
+        if (process.env.NODE_ENV === 'development') {
+          console.log('🎵 [LoadSong] 加载完成，返回 true', {
+            duration: loadDuration.toFixed(2) + 'ms',
+            performanceGrade: loadDuration < 100 ? '优秀' : loadDuration < 300 ? '良好' : loadDuration < 500 ? '一般' : '需要优化'
+          })
+        }
+        
+        // 主动发出 song-changed 事件，确保父组件收到更新
+        try {
+          if (process.env.NODE_ENV === 'development') {
+            console.log('🎵 [LoadSong] 发出 song-changed 事件:', this.currentSong?.name)
+          }
+          this.$emit('song-changed', this.currentSong)
+        } catch (error) {
+          console.error('🎵 [LoadSong] 发出 song-changed 事件失败:', error)
+        }
+        
+        // 延迟清除加载状态，避免响应式更新期间的重复加载
+        this.$nextTick(() => {
+          this.isLoadingSong = false
+          if (process.env.NODE_ENV === 'development') {
+            console.log('🎵 [LoadSong] 延迟清除加载状态')
+          }
+        })
+        
         return true
       } catch (error) {
-        console.error('加载歌曲失败:', error)
+        if (process.env.NODE_ENV === 'development') {
+          console.error('🎵 [LoadSong] 加载歌曲失败:', error)
+          console.log('🎵 [LoadSong] 恢复之前的歌曲:', previousSong?.name || previousSong?.filename)
+        }
         this.showError(`加载歌曲失败: ${error.response?.data?.msg || error.message}`)
         // 恢复之前的歌曲
         this.currentSong = previousSong
+        // 清除加载状态
+        this.isLoadingSong = false
         return false
       }
     },
@@ -592,10 +868,12 @@ export default {
     // 加载歌词
     async loadLyric(song) {
       try {
-        console.log('开始加载歌词，歌曲信息:', {
-          hash: song.hash,
-          album_audio_id: song.album_audio_id
-        })
+        if (process.env.NODE_ENV === 'development') {
+          console.log('开始加载歌词，歌曲信息:', {
+            hash: song.hash,
+            album_audio_id: song.album_audio_id
+          })
+        }
         
         // 设置超时和重试机制
         const lyricResponse = await Promise.race([
@@ -605,41 +883,78 @@ export default {
           )
         ])
         
-        console.log('歌词API响应:', lyricResponse)
+        if (process.env.NODE_ENV === 'development') {
+          console.log('歌词API响应:', lyricResponse)
+        }
         
         // 检查API响应状态 (可能是status: 200 或 status: 1)
         if (lyricResponse && (lyricResponse.status === 200 || lyricResponse.status === 1)) {
+          // 保存完整的歌词数据（包含翻译信息）
+          this.currentLyricData = lyricResponse
+          
+          if (process.env.NODE_ENV === 'development') {
+            console.log('🎵 歌词API完整响应:')
+            console.log('  - 响应状态:', lyricResponse.status)
+            console.log('  - 所有字段:', Object.keys(lyricResponse))
+            console.log('  - language字段存在:', 'language' in lyricResponse)
+            console.log('  - decodeContent存在:', 'decodeContent' in lyricResponse)
+            if (lyricResponse.language) {
+              console.log('  - language字段内容:', lyricResponse.language.substring(0, 200))
+            }
+          }
+          
           // 优先使用解码后的内容
           if (lyricResponse.decodeContent) {
             this.currentLyrics = lyricResponse.decodeContent
-            console.log('歌词加载成功（已解码），内容长度:', lyricResponse.decodeContent.length)
-            console.log('设置的歌词内容预览:', this.currentLyrics.substring(0, 200))
+            if (process.env.NODE_ENV === 'development') {
+              console.log('歌词加载成功（已解码），内容长度:', lyricResponse.decodeContent.length)
+              console.log('设置的歌词内容预览:', this.currentLyrics.substring(0, 200))
+            }
+            // 发送歌词到桌面歌词窗口
+            this.sendLyricsToDesktop(this.currentLyrics, lyricResponse)
           } else if (lyricResponse.content) {
             // 如果没有解码内容，尝试使用原始content（可能是base64编码）
             try {
               // 尝试base64解码
               const decoded = atob(lyricResponse.content)
               this.currentLyrics = decoded
-              console.log('歌词base64解码成功，内容长度:', decoded.length)
+              if (process.env.NODE_ENV === 'development') {
+                console.log('歌词base64解码成功，内容长度:', decoded.length)
+              }
+              // 发送歌词到桌面歌词窗口
+              this.sendLyricsToDesktop(this.currentLyrics, lyricResponse)
             } catch (e) {
               // 如果解码失败，直接使用原始内容
               this.currentLyrics = lyricResponse.content
-              console.log('使用原始歌词内容，长度:', lyricResponse.content.length)
+              if (process.env.NODE_ENV === 'development') {
+                console.log('使用原始歌词内容，长度:', lyricResponse.content.length)
+              }
+              // 发送歌词到桌面歌词窗口
+              this.sendLyricsToDesktop(this.currentLyrics, lyricResponse)
             }
           } else if (lyricResponse.data && lyricResponse.data.content) {
             // 尝试从data.content获取
             this.currentLyrics = lyricResponse.data.content
-            console.log('从data.content获取歌词成功')
+            if (process.env.NODE_ENV === 'development') {
+              console.log('从data.content获取歌词成功')
+            }
+            // 发送歌词到桌面歌词窗口
+            this.sendLyricsToDesktop(this.currentLyrics, lyricResponse)
           } else {
             // 打印完整响应以便调试
-            console.log('完整歌词API响应:', JSON.stringify(lyricResponse, null, 2))
+            if (process.env.NODE_ENV === 'development') {
+              console.log('完整歌词API响应:', JSON.stringify(lyricResponse, null, 2))
+              console.log('歌词内容为空，使用默认歌词')
+            }
             this.setDefaultLyrics(song)
-            console.log('歌词内容为空，使用默认歌词')
           }
         } else {
-          console.log('完整响应:', JSON.stringify(lyricResponse, null, 2))
+          if (process.env.NODE_ENV === 'development') {
+            console.log('完整响应:', JSON.stringify(lyricResponse, null, 2))
+            console.log('歌词获取失败，状态:', lyricResponse?.status)
+          }
+          this.currentLyricData = null
           this.setDefaultLyrics(song)
-          console.log('歌词获取失败，状态:', lyricResponse?.status)
         }
       } catch (error) {
         console.error('加载歌词失败:', error)
@@ -650,6 +965,9 @@ export default {
           this.setDefaultLyrics(song)
         } else {
           this.currentLyrics = '[00:00.00]歌词服务暂时不可用'
+          this.currentLyricData = null
+          // 也要发送默认歌词到桌面
+          this.sendLyricsToDesktop(this.currentLyrics)
         }
       }
     },
@@ -666,6 +984,252 @@ export default {
 [00:08.00] 请欣赏
 [00:10.00]
 [00:30.00] 享受音乐带来的美好时光`
+      this.currentLyricData = null
+      
+      // 发送默认歌词到桌面歌词窗口
+      this.sendLyricsToDesktop(this.currentLyrics)
+    },
+
+    // 发送歌词到桌面歌词窗口
+    sendLyricsToDesktop(lrcContent, rawLyricData = null) {
+      if (!window.electronAPI || !window.electronAPI.updateLyrics) {
+        console.log('❌ electronAPI.updateLyrics 不可用')
+        return
+      }
+
+      try {
+        console.log('🎵 开始解析歌词发送到桌面歌词窗口')
+        console.log('歌词内容长度:', lrcContent?.length)
+        console.log('歌词内容预览:', lrcContent?.substring(0, 300))
+        
+        if (!lrcContent) {
+          console.log('歌词内容为空，发送空数组')
+          window.electronAPI.updateLyrics([])
+          return
+        }
+
+        // 解析歌词内容，转换为桌面歌词所需的格式
+        const parsedLyrics = this.parseLyricsForDesktop(lrcContent, rawLyricData)
+        
+        console.log('🎵 解析完成，发送', parsedLyrics.length, '行歌词到桌面')
+        console.log('🎵 前3行歌词预览:', parsedLyrics.slice(0, 3))
+        window.electronAPI.updateLyrics(parsedLyrics)
+      } catch (error) {
+        console.error('❌ 发送歌词到桌面歌词窗口失败:', error)
+      }
+    },
+
+    // 解析歌词内容为桌面歌词格式
+    parseLyricsForDesktop(lrcContent, rawLyricData = null) {
+      if (!lrcContent) return []
+
+      // 清理BOM和多余的空白字符
+      let cleanContent = lrcContent.replace(/^\ufeff/, '') // 移除BOM
+      cleanContent = cleanContent.trim()
+      
+      // 处理不同的换行符
+      const lines = cleanContent.split(/\r\n|\n|\r/).filter(line => line.trim())
+      const result = []
+      
+      console.log('🎵 桌面歌词解析 - 总行数:', lines.length)
+      console.log('🎵 桌面歌词解析 - 前5行:', lines.slice(0, 5))
+      
+      // 检测歌词格式
+      const hasKrcFormat = lines.some(line => /^\[\d+,\d+\]/.test(line.trim()))
+      const hasLrcFormat = lines.some(line => /^\[\d{1,2}:\d{2}/.test(line.trim()))
+      
+      console.log('🎵 歌词格式检测 - KRC格式:', hasKrcFormat, 'LRC格式:', hasLrcFormat)
+      
+      if (hasKrcFormat) {
+        // 解析KRC格式歌词
+        return this.parseKrcLyrics(lines)
+      } else if (hasLrcFormat) {
+        // 解析LRC格式歌词
+        return this.parseLrcLyrics(lines)
+      } else {
+        console.log('🎵 未识别的歌词格式')
+        return []
+      }
+    },
+
+    // 解析KRC格式歌词（支持卡拉OK逐字效果）
+    parseKrcLyrics(lines) {
+      const result = []
+      
+      for (let i = 0; i < lines.length; i++) {
+        const trimmedLine = lines[i].trim()
+        if (!trimmedLine) continue
+        
+        // 跳过元数据行
+        if (trimmedLine.match(/^\[(?:ar|ti|al|by|offset|id|length|re|ve|language)[:]/i)) {
+          console.log('🎵 跳过KRC元数据行:', trimmedLine.substring(0, 50))
+          continue
+        }
+        
+        // KRC格式: [开始时间,持续时间]<字时间信息>歌词内容
+        const krcMatch = trimmedLine.match(/^\[(\d+),(\d+)\](.*)/)
+        if (!krcMatch) {
+          console.log('🎵 跳过非KRC格式行:', trimmedLine.substring(0, 50))
+          continue
+        }
+        
+        const lineStartTime = parseInt(krcMatch[1]) // 行开始时间（毫秒）
+        const lineDuration = parseInt(krcMatch[2])   // 行持续时间（毫秒）
+        const content = krcMatch[3]              // 歌词内容部分
+        
+        console.log('🎵 处理KRC行:', {
+          lineStartTime: lineStartTime + 'ms',
+          lineDuration: lineDuration + 'ms',
+          content: content.substring(0, 50)
+        })
+        
+        // 解析逐字时间信息和文本
+        const wordData = this.parseKrcWordTimings(content, lineStartTime)
+        
+        if (wordData.words.length > 0) {
+          const lyricObj = {
+            time: lineStartTime,
+            text: wordData.fullText,
+            words: wordData.words, // 逐字时间信息
+            duration: lineDuration,
+            isKrc: true // 标记为KRC格式，支持卡拉OK效果
+          }
+          
+          result.push(lyricObj)
+          console.log('🎵 KRC解析结果:', {
+            time: lineStartTime,
+            text: wordData.fullText,
+            wordsCount: wordData.words.length
+          })
+        }
+      }
+      
+      // 按时间排序
+      result.sort((a, b) => a.time - b.time)
+      
+      console.log('🎵 KRC桌面歌词解析结果:', {
+        totalLines: result.length,
+        firstFew: result.slice(0, 3),
+        lastFew: result.slice(-3)
+      })
+      
+      return result
+    },
+
+    // 解析KRC逐字时间信息
+    parseKrcWordTimings(content, lineStartTime) {
+      const words = []
+      let fullText = ''
+      
+      // 正则表达式匹配 <时间偏移,持续时间,类型>文字 的模式
+      const wordPattern = /<(\d+),(\d+)(?:,\d+)?>(.*?)(?=<|\s*$)/g
+      let match
+      
+      while ((match = wordPattern.exec(content)) !== null) {
+        const timeOffset = parseInt(match[1])     // 时间偏移（毫秒）
+        const duration = parseInt(match[2])       // 持续时间（毫秒）
+        let text = match[3]                       // 文字内容（保留原始空格）
+        
+        if (text) {
+          const wordObj = {
+            word: text, // 保持与全屏歌词一致的字段名
+            startTime: timeOffset, // 相对时间偏移
+            endTime: timeOffset + duration, // 相对结束时间
+            duration: duration
+          }
+          
+          words.push(wordObj)
+          fullText += text
+        }
+      }
+      
+      // 如果没有匹配到逐字信息，尝试提取纯文本
+      if (words.length === 0) {
+        const plainText = content
+          .replace(/<\d+,\d+(?:,\d+)?>/g, '') // 移除时间标签
+          .replace(/<\/?\w+>/g, '')           // 移除其他HTML标签
+          .trim()
+        
+        if (plainText) {
+          fullText = plainText
+          // 创建一个整行的word对象
+          words.push({
+            word: plainText,
+            startTime: 0,
+            endTime: 0,
+            duration: 0
+          })
+        }
+      }
+      
+      return {
+        words: words,
+        fullText: fullText
+      }
+    },
+
+    // 解析LRC格式歌词
+    parseLrcLyrics(lines) {
+      const result = []
+      const timeRegex = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g
+      
+      for (let i = 0; i < lines.length; i++) {
+        const trimmedLine = lines[i].trim()
+        if (!trimmedLine) continue
+        
+        // 跳过元数据行
+        if (trimmedLine.match(/^\[(?:ar|ti|al|by|offset|id|length|re|ve|language)[:]/i)) {
+          console.log('🎵 跳过LRC元数据行:', trimmedLine.substring(0, 50))
+          continue
+        }
+        
+        // 检查是否包含时间标签
+        const hasTimeTag = /\[\d{1,2}:\d{2}/.test(trimmedLine)
+        if (!hasTimeTag) {
+          console.log('🎵 跳过无时间标签的LRC行:', trimmedLine.substring(0, 50))
+          continue
+        }
+        
+        console.log('🎵 处理LRC歌词行:', trimmedLine.substring(0, 100))
+        
+        const timeMatches = []
+        
+        // 重置正则表达式的lastIndex
+        timeRegex.lastIndex = 0
+        let match
+        
+        // 找到所有时间标签
+        while ((match = timeRegex.exec(trimmedLine)) !== null) {
+          const minutes = parseInt(match[1])
+          const seconds = parseInt(match[2])
+          const millisecondsStr = match[3] || '0'
+          const milliseconds = parseInt(millisecondsStr.padEnd(3, '0'))
+          const timeInMs = minutes * 60000 + seconds * 1000 + milliseconds
+          timeMatches.push(timeInMs)
+        }
+        
+        // 移除时间标签，获取纯歌词文本
+        const text = trimmedLine.replace(/\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]/g, '').trim()
+        
+        // 为每个时间标签创建歌词对象
+        for (const timeInMs of timeMatches) {
+          const lyricObj = {
+            time: timeInMs,
+            text: text || '♪'
+          }
+          result.push(lyricObj)
+        }
+      }
+      
+      // 按时间排序
+      result.sort((a, b) => a.time - b.time)
+      
+      console.log('🎵 LRC桌面歌词解析结果:', {
+        totalLines: result.length,
+        firstFew: result.slice(0, 3)
+      })
+      
+      return result
     },
     
     // 播放/暂停
@@ -689,20 +1253,25 @@ export default {
     async playPrevious() {
       if (this.playlist.length === 0) return
       
-      // 防止并发切歌
+      // 防止并发切歌，使用更短的锁定时间
       if (this.isSwitchingSong) {
-        console.warn('正在切歌中，忽略本次请求')
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('正在切歌中，忽略本次请求')
+        }
         return
       }
       
-      // 清除防抖定时器
-      if (this.switchSongDebounceTimer) {
-        clearTimeout(this.switchSongDebounceTimer)
-      }
-      
-      // 设置切歌锁
+      // 设置切歌锁，使用更轻量的锁机制
       this.isSwitchingSong = true
-      console.log('开始切歌（上一曲），已加锁')
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🎵 开始切歌（上一曲）- isSwitchingSong:', this.isSwitchingSong, 'showLyricView:', this.showLyricView)
+        // 性能监控：记录RAF调用计数
+        if (window._lyricRafCount) {
+          console.log('🔄 切歌前RAF调用总数:', window._lyricRafCount)
+          window._switchStartRafCount = window._lyricRafCount
+        }
+      }
       
       const originalIndex = this.currentIndex
       let attempts = 0
@@ -712,42 +1281,82 @@ export default {
       
       try {
         while (attempts < maxAttempts) {
+          let prevIndex = -1
           if (this.playMode === 'shuffle') {
             // 使用预先打乱的播放列表
             if (this.shuffledPlaylist.length > 0) {
               // 在已打乱的列表中找到当前位置
-              const shuffledIndex = this.shuffledPlaylist.findIndex(song => song.hash === this.currentSong.hash)
+              const shuffledIndex = this.shuffledPlaylist.findIndex(song => song.hash === this.currentSong?.hash)
               if (shuffledIndex !== -1) {
-                // 获取上一首歌曲（在打乱列表中的位置）
-                const prevIndex = (shuffledIndex - 1 + this.shuffledPlaylist.length) % this.shuffledPlaylist.length
-                const prevSong = this.shuffledPlaylist[prevIndex]
-                
-                // 在原始播放列表中找到这首歌的索引
-                this.currentIndex = this.playlist.findIndex(song => song.hash === prevSong.hash)
-                console.log('随机模式上一首:', prevSong.name, '原始索引:', this.currentIndex)
-              } else {
-                // 如果找不到当前歌曲，使用随机选择
-                this.currentIndex = Math.floor(Math.random() * this.playlist.length)
-                console.log('当前歌曲不在随机列表中，随机选择:', this.currentIndex)
+                // 从当前位置开始，寻找上一首有效歌曲
+                for (let i = 1; i < this.shuffledPlaylist.length; i++) {
+                  const candidateIndex = (shuffledIndex - i + this.shuffledPlaylist.length) % this.shuffledPlaylist.length
+                  const candidateSong = this.shuffledPlaylist[candidateIndex]
+                  if (candidateSong && candidateSong.hash) {
+                    prevIndex = this.playlist.findIndex(song => song.hash === candidateSong.hash)
+                    if (prevIndex !== -1) {
+                      console.log('随机模式上一首:', candidateSong.name, '原始索引:', prevIndex)
+                      break
+                    }
+                  }
+                }
               }
-            } else {
-              // 如果没有生成随机列表，使用随机选择
-              this.currentIndex = Math.floor(Math.random() * this.playlist.length)
-              console.log('未生成随机列表，随机选择:', this.currentIndex)
+              
+              // 如果还没找到有效歌曲，在整个随机列表中逆序寻找
+              if (prevIndex === -1) {
+                for (let i = this.shuffledPlaylist.length - 1; i >= 0; i--) {
+                  const candidateSong = this.shuffledPlaylist[i]
+                  if (candidateSong && candidateSong.hash) {
+                    prevIndex = this.playlist.findIndex(song => song.hash === candidateSong.hash)
+                    if (prevIndex !== -1) {
+                      console.log('随机列表中找到有效歌曲:', candidateSong.name, '原始索引:', prevIndex)
+                      break
+                    }
+                  }
+                }
+              }
+            }
+            
+            // 最后的备选方案：在原始播放列表中逆序寻找有效歌曲
+            if (prevIndex === -1) {
+              for (let i = 0; i < this.playlist.length; i++) {
+                const candidateIndex = (this.currentIndex - i - 1 + this.playlist.length) % this.playlist.length
+                const candidateSong = this.playlist[candidateIndex]
+                if (candidateSong && candidateSong.hash) {
+                  prevIndex = candidateIndex
+                  console.log('原始列表中找到有效歌曲:', candidateSong.name, '索引:', prevIndex)
+                  break
+                }
+              }
             }
           } else {
-            // 列表循环
-            this.currentIndex = (this.currentIndex - 1 + this.playlist.length) % this.playlist.length
+            // 列表循环 - 寻找上一首有效歌曲
+            for (let i = 1; i <= this.playlist.length; i++) {
+              const candidateIndex = (this.currentIndex - i + this.playlist.length) % this.playlist.length
+              const candidateSong = this.playlist[candidateIndex]
+              if (candidateSong && candidateSong.hash) {
+                prevIndex = candidateIndex
+                console.log('循环模式上一首:', candidateSong.name, '索引:', prevIndex)
+                break
+              }
+            }
           }
           
+          // 如果没有找到任何有效歌曲，直接退出
+          if (prevIndex === -1) {
+            console.error('播放列表中没有有效歌曲（含有hash字段）')
+            break
+          }
+          
+          this.currentIndex = prevIndex
           const nextSong = this.playlist[this.currentIndex]
           console.log(`尝试播放上一曲 (${attempts + 1}/${maxAttempts}):`, nextSong.name || nextSong.filename, '索引:', this.currentIndex)
           
-          // 验证歌曲是否有效（必须有 hash）
-          if (!nextSong.hash) {
-            console.warn('歌曲缺少 hash，跳过:', nextSong)
-            await new Promise(resolve => setTimeout(resolve, 300))
+          // 双重检查：验证歌曲是否有效
+          if (!nextSong || !nextSong.hash) {
+            console.warn('选中的歌曲无效，跳过:', nextSong)
             attempts++
+            await new Promise(resolve => setTimeout(resolve, 300))
             continue
           }
           
@@ -769,11 +1378,17 @@ export default {
         this.showError('播放列表中没有可播放的歌曲')
       } finally {
         this.isNavigatingHistory = false // 重置导航标志
-        // 解除切歌锁，添加防抖延迟
-        this.switchSongDebounceTimer = setTimeout(() => {
-          this.isSwitchingSong = false
-          console.log('切歌完成，已解锁')
-        }, 300)
+        // 立即解除切歌锁，不使用延迟
+        this.isSwitchingSong = false
+        
+        if (process.env.NODE_ENV === 'development') {
+          console.log('✅ 上一曲切歌完成，已解锁 - isSwitchingSong:', this.isSwitchingSong)
+          // 性能监控：计算切歌期间的RAF调用增量
+          if (window._switchStartRafCount && window._lyricRafCount) {
+            const rafIncrease = window._lyricRafCount - window._switchStartRafCount
+            console.log('🔄 上一曲切歌期间RAF调用增量:', rafIncrease, '总计:', window._lyricRafCount)
+          }
+        }
       }
     },
     
@@ -781,20 +1396,25 @@ export default {
     async playNext() {
       if (this.playlist.length === 0) return
       
-      // 防止并发切歌
+      // 防止并发切歌，使用更短的锁定时间
       if (this.isSwitchingSong) {
-        console.warn('正在切歌中，忽略本次请求')
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('正在切歌中，忽略本次请求')
+        }
         return
       }
       
-      // 清除防抖定时器
-      if (this.switchSongDebounceTimer) {
-        clearTimeout(this.switchSongDebounceTimer)
-      }
-      
-      // 设置切歌锁
+      // 设置切歌锁，使用更轻量的锁机制
       this.isSwitchingSong = true
-      console.log('开始切歌（下一曲），已加锁')
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🎵 开始切歌（下一曲）- isSwitchingSong:', this.isSwitchingSong, 'showLyricView:', this.showLyricView)
+        // 性能监控：记录RAF调用计数
+        if (window._lyricRafCount) {
+          console.log('🔄 切歌前RAF调用总数:', window._lyricRafCount)
+          window._switchStartRafCount = window._lyricRafCount
+        }
+      }
       
       try {
         const originalIndex = this.currentIndex
@@ -805,59 +1425,110 @@ export default {
         // 先检查"下一首播放"队列
         if (this.playNextQueue.length > 0) {
           const nextSong = this.playNextQueue.shift() // 取出队列第一首
-          const songIndex = this.playlist.findIndex(s => s.hash === nextSong.hash)
+          let songIndex = this.playlist.findIndex(s => s.hash === nextSong.hash)
           
-          if (songIndex !== -1) {
-            this.currentIndex = songIndex
-            console.log('播放"下一首播放"队列中的歌曲:', nextSong.name, '索引:', this.currentIndex)
+          // 如果歌曲不在播放列表中，添加它
+          if (songIndex === -1) {
+            this.playlist.push(nextSong)
+            songIndex = this.playlist.length - 1
+            console.log('🎵 队列歌曲不在播放列表中，已添加:', nextSong.name)
             
-            const success = await this.loadSong(nextSong)
-            if (success) {
-              console.log('下一首播放成功:', nextSong.name)
-              return
+            // 如果是随机模式，重新生成随机播放列表
+            if (this.playMode === 'shuffle') {
+              this.generateShuffledPlaylist()
+              console.log('🔀 重新生成随机播放列表以包含队列歌曲')
             }
-            console.warn('下一首播放失败，继续尝试队列中的下一首或正常播放...')
-            continue // 继续尝试下一首
           }
+          
+          this.currentIndex = songIndex
+          console.log('播放"下一首播放"队列中的歌曲:', nextSong.name, '索引:', this.currentIndex)
+          
+          const success = await this.loadSong(nextSong)
+          if (success) {
+            console.log('下一首播放成功:', nextSong.name)
+            return
+          }
+          console.warn('下一首播放失败，继续尝试队列中的下一首或正常播放...')
+          continue // 继续尝试下一首
         }
         
         // 正常播放逻辑
+        let nextIndex = -1
         if (this.playMode === 'shuffle') {
           // 使用预先打乱的播放列表
           if (this.shuffledPlaylist.length > 0) {
             // 在已打乱的列表中找到当前位置
-            const shuffledIndex = this.shuffledPlaylist.findIndex(song => song.hash === this.currentSong.hash)
+            const shuffledIndex = this.shuffledPlaylist.findIndex(song => song.hash === this.currentSong?.hash)
             if (shuffledIndex !== -1) {
-              // 获取下一首歌曲（在打乱列表中的位置）
-              const nextIndex = (shuffledIndex + 1) % this.shuffledPlaylist.length
-              const nextSong = this.shuffledPlaylist[nextIndex]
-              
-              // 在原始播放列表中找到这首歌的索引
-              this.currentIndex = this.playlist.findIndex(song => song.hash === nextSong.hash)
-              console.log('随机模式下一首:', nextSong.name, '原始索引:', this.currentIndex)
-            } else {
-              // 如果找不到当前歌曲，使用随机选择
-              this.currentIndex = Math.floor(Math.random() * this.playlist.length)
-              console.log('当前歌曲不在随机列表中，随机选择:', this.currentIndex)
+              // 从当前位置开始，寻找下一首有效歌曲
+              for (let i = 1; i < this.shuffledPlaylist.length; i++) {
+                const candidateIndex = (shuffledIndex + i) % this.shuffledPlaylist.length
+                const candidateSong = this.shuffledPlaylist[candidateIndex]
+                if (candidateSong && candidateSong.hash) {
+                  nextIndex = this.playlist.findIndex(song => song.hash === candidateSong.hash)
+                  if (nextIndex !== -1) {
+                    console.log('随机模式下一首:', candidateSong.name, '原始索引:', nextIndex)
+                    break
+                  }
+                }
+              }
             }
-          } else {
-            // 如果没有生成随机列表，使用随机选择
-            this.currentIndex = Math.floor(Math.random() * this.playlist.length)
-            console.log('未生成随机列表，随机选择:', this.currentIndex)
+            
+            // 如果还没找到有效歌曲，在整个随机列表中寻找
+            if (nextIndex === -1) {
+              for (let i = 0; i < this.shuffledPlaylist.length; i++) {
+                const candidateSong = this.shuffledPlaylist[i]
+                if (candidateSong && candidateSong.hash) {
+                  nextIndex = this.playlist.findIndex(song => song.hash === candidateSong.hash)
+                  if (nextIndex !== -1) {
+                    console.log('随机列表中找到有效歌曲:', candidateSong.name, '原始索引:', nextIndex)
+                    break
+                  }
+                }
+              }
+            }
+          }
+          
+          // 最后的备选方案：在原始播放列表中寻找有效歌曲
+          if (nextIndex === -1) {
+            for (let i = 0; i < this.playlist.length; i++) {
+              const candidateIndex = (this.currentIndex + i + 1) % this.playlist.length
+              const candidateSong = this.playlist[candidateIndex]
+              if (candidateSong && candidateSong.hash) {
+                nextIndex = candidateIndex
+                console.log('原始列表中找到有效歌曲:', candidateSong.name, '索引:', nextIndex)
+                break
+              }
+            }
           }
         } else {
-          // 列表循环
-          this.currentIndex = (this.currentIndex + 1) % this.playlist.length
+          // 列表循环 - 寻找下一首有效歌曲
+          for (let i = 1; i <= this.playlist.length; i++) {
+            const candidateIndex = (this.currentIndex + i) % this.playlist.length
+            const candidateSong = this.playlist[candidateIndex]
+            if (candidateSong && candidateSong.hash) {
+              nextIndex = candidateIndex
+              console.log('循环模式下一首:', candidateSong.name, '索引:', nextIndex)
+              break
+            }
+          }
         }
         
+        // 如果没有找到任何有效歌曲，直接退出
+        if (nextIndex === -1) {
+          console.error('播放列表中没有有效歌曲（含有hash字段）')
+          break
+        }
+        
+        this.currentIndex = nextIndex
         const nextSong = this.playlist[this.currentIndex]
         console.log(`尝试播放下一曲 (${attempts + 1}/${maxAttempts}):`, nextSong.name || nextSong.filename, '索引:', this.currentIndex)
         
-        // 验证歌曲是否有效（必须有 hash）
-        if (!nextSong.hash) {
-          console.warn('歌曲缺少 hash，跳过:', nextSong)
-          await new Promise(resolve => setTimeout(resolve, 300))
+        // 双重检查：验证歌曲是否有效
+        if (!nextSong || !nextSong.hash) {
+          console.warn('选中的歌曲无效，跳过:', nextSong)
           attempts++
+          await new Promise(resolve => setTimeout(resolve, 300))
           continue
         }
         
@@ -882,22 +1553,44 @@ export default {
       this.currentIndex = originalIndex
       this.showError('播放列表中没有可播放的歌曲')
       } finally {
-        // 解除切歌锁，添加防抖延迟
-        this.switchSongDebounceTimer = setTimeout(() => {
-          this.isSwitchingSong = false
-          console.log('切歌完成，已解锁')
-        }, 300)
+        // 立即解除切歌锁，不使用延迟
+        this.isSwitchingSong = false
+        
+        if (process.env.NODE_ENV === 'development') {
+          console.log('✅ 下一曲切歌完成，已解锁 - isSwitchingSong:', this.isSwitchingSong)
+          // 性能监控：计算切歌期间的RAF调用增量
+          if (window._switchStartRafCount && window._lyricRafCount) {
+            const rafIncrease = window._lyricRafCount - window._switchStartRafCount
+            console.log('🔄 下一曲切歌期间RAF调用增量:', rafIncrease, '总计:', window._lyricRafCount)
+          }
+        }
       }
     },
     
     // RAF 驱动的高频时间更新（60fps）
     updateTimeLoop() {
-      const audioEl = this.$refs.audioPlayer
-      if (audioEl && !this.isDragging) {
-        this.currentTime = audioEl.currentTime
+      try {
+        // 检查组件是否已卸载
+        if (!this.$el || !this.$refs.audioPlayer) {
+          return
+        }
+        
+        const audioEl = this.$refs.audioPlayer
+        if (audioEl && !this.isDragging && !isNaN(audioEl.currentTime)) {
+          // 只在时间有明显变化时更新，减少不必要的响应式更新
+          const newTime = audioEl.currentTime
+          if (Math.abs(newTime - this.currentTime) > 0.1) {
+            this.currentTime = newTime
+          }
+        }
+        
+        // 持续循环
+        this.rafId = requestAnimationFrame(this.updateTimeLoop)
+      } catch (error) {
+        console.error('时间更新循环错误:', error)
+        // 停止循环以防止连续错误
+        this.stopTimeUpdate()
       }
-      // 持续循环
-      this.rafId = requestAnimationFrame(this.updateTimeLoop)
     },
     
     // 启动时间更新循环
@@ -972,6 +1665,10 @@ export default {
         navigator.mediaSession.playbackState = 'playing'
         this.updatePositionState()
       }
+      // 同步播放状态到系统托盘
+      if (window.electronAPI && window.electronAPI.updatePlaybackState) {
+        window.electronAPI.updatePlaybackState(true)
+      }
     },
     
     // 音频暂停事件
@@ -981,6 +1678,10 @@ export default {
       if ('mediaSession' in navigator) {
         navigator.mediaSession.playbackState = 'paused'
         this.updatePositionState()
+      }
+      // 同步播放状态到系统托盘
+      if (window.electronAPI && window.electronAPI.updatePlaybackState) {
+        window.electronAPI.updatePlaybackState(false)
       }
     },
     
@@ -1083,6 +1784,13 @@ export default {
     async showLyrics() {
       if (!this.currentSong) return
       
+      // 如果正在切歌中，延迟显示歌词，避免资源竞争
+      if (this.isSwitchingSong) {
+        console.log('切歌中，延迟显示歌词')
+        setTimeout(() => this.showLyrics(), 100)
+        return
+      }
+      
       // 如果没有歌词，尝试加载
       if (!this.currentLyrics) {
         await this.loadLyric(this.currentSong)
@@ -1094,6 +1802,13 @@ export default {
 
     // 关闭歌词界面
     closeLyrics() {
+      // 如果正在切歌中，立即关闭，不要等待动画
+      if (this.isSwitchingSong) {
+        this.showLyricView = false
+        this.$emit('lyric-view-changed', false)
+        return
+      }
+      
       this.showLyricView = false
       this.$emit('lyric-view-changed', false)
     },
@@ -1137,24 +1852,49 @@ export default {
     // 播放列表中的歌曲
     async handlePlaylistPlay(song) {
       const index = this.playlist.findIndex(s => s.hash === song.hash)
+      console.log('🎵 [PlaylistPlay] 开始处理播放请求:', {
+        songName: song.name || song.filename,
+        songHash: song.hash,
+        foundIndex: index,
+        currentIndex: this.currentIndex,
+        currentSongHash: this.currentSong?.hash,
+        currentSongName: this.currentSong?.name || this.currentSong?.filename
+      })
+      
       if (index !== -1) {
         const previousIndex = this.currentIndex
+        console.log('🎵 [PlaylistPlay] 更新索引:', { from: previousIndex, to: index })
         this.currentIndex = index
         
-        console.log('🎵 用户手动点击播放:', song.name, '索引:', index)
+        console.log('🎵 [PlaylistPlay] 调用 loadSong 前状态:', {
+          currentSong: this.currentSong?.name || this.currentSong?.filename,
+          targetSong: song.name || song.filename,
+          isPlaying: this.isPlaying
+        })
+        
         const success = await this.loadSong(song)
         
+        console.log('🎵 [PlaylistPlay] loadSong 完成:', {
+          success,
+          currentSong: this.currentSong?.name || this.currentSong?.filename,
+          currentSongHash: this.currentSong?.hash,
+          targetSongHash: song.hash,
+          isPlaying: this.isPlaying
+        })
+        
         if (success) {
-          console.log('✅ 手动播放成功')
+          console.log('✅ [PlaylistPlay] 手动播放成功')
           // 如果是随机模式，添加到已播放历史
           if (this.playMode === 'shuffle' && !this.playedHistory.includes(index)) {
             this.playedHistory.push(index)
           }
         } else {
-          console.warn('❌ 手动播放失败，恢复原索引')
+          console.warn('❌ [PlaylistPlay] 手动播放失败，恢复原索引')
           this.currentIndex = previousIndex
           this.showError(`无法播放《${song.name}》`)
         }
+      } else {
+        console.warn('❌ [PlaylistPlay] 在播放列表中未找到歌曲:', song.name || song.filename)
       }
     },
     
@@ -1205,8 +1945,15 @@ export default {
         console.log('🎯 添加到下一首播放队列:', song.name, '队列长度:', this.playNextQueue.length)
         
         // 如果歌曲不在播放列表中，添加到播放列表
-        if (!this.playlist.some(s => s.hash === song.hash)) {
+        const wasInPlaylist = this.playlist.some(s => s.hash === song.hash)
+        if (!wasInPlaylist) {
           this.playlist.push(song)
+          
+          // 如果是随机播放模式且歌曲是新添加的，同步更新随机播放列表
+          if (this.playMode === 'shuffle') {
+            console.log('🔀 随机播放模式下添加新歌曲，立即更新随机播放列表')
+            this.generateShuffledPlaylist()
+          }
         }
       } else {
         console.log('歌曲已在下一首播放队列中:', song.name)
@@ -1374,6 +2121,16 @@ export default {
         this.currentTime = audioEl.currentTime
         this.duration = audioEl.duration || 0
         
+        // 节流发送播放时间到桌面歌词窗口（每150ms最多发送一次，减少闪烁）
+        if (window.electronAPI && window.electronAPI.updatePlaybackTime) {
+          const now = Date.now()
+          if (!this.lastDesktopTimeUpdate || now - this.lastDesktopTimeUpdate >= 150) {
+            this.lastDesktopTimeUpdate = now
+            // 转换为毫秒并发送
+            window.electronAPI.updatePlaybackTime(audioEl.currentTime * 1000)
+          }
+        }
+        
         // 定期更新 MediaSession 位置状态（每秒更新一次，避免过于频繁）
         if ('mediaSession' in navigator && this.isPlaying) {
           const now = Math.floor(audioEl.currentTime)
@@ -1449,6 +2206,44 @@ export default {
         } catch (error) {
           console.error('❌ 初始化 MediaSession 处理器失败:', error)
         }
+      }
+    },
+    
+    // 初始化系统托盘播放器控制监听器
+    initTrayPlayerControlListener() {
+      if (window.electronAPI && window.electronAPI.onPlayerControl) {
+        try {
+          this.trayControlUnsubscribe = window.electronAPI.onPlayerControl((action) => {
+            console.log('🎵 [MusicPlayer] 收到系统托盘控制事件:', action)
+            
+            switch (action) {
+              case 'play':
+                if (!this.isPlaying) {
+                  this.togglePlay()
+                }
+                break
+              case 'pause':
+                if (this.isPlaying) {
+                  this.togglePlay()
+                }
+                break
+              case 'prev':
+                this.playPrevious()
+                break
+              case 'next':
+                this.playNext()
+                break
+              default:
+                console.warn('🎵 [MusicPlayer] 未知的托盘控制动作:', action)
+            }
+          })
+          
+          console.log('✅ 系统托盘播放器控制监听器已初始化')
+        } catch (error) {
+          console.error('❌ 初始化系统托盘播放器控制监听器失败:', error)
+        }
+      } else {
+        console.warn('⚠️ ElectronAPI 不可用，跳过系统托盘控制监听器初始化')
       }
     }
   }
@@ -1975,19 +2770,19 @@ export default {
   }
 }
 
-/* 歌词界面过渡动画 */
+/* 歌词界面过渡动画 - 优化后更快更平滑 */
 .lyric-view-enter-active,
 .lyric-view-leave-active {
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 
 .lyric-view-enter-from {
   opacity: 0;
-  transform: scale(1.1);
+  transform: scale(1.05);
 }
 
 .lyric-view-leave-to {
   opacity: 0;
-  transform: scale(0.9);
+  transform: scale(0.95);
 }
 </style>

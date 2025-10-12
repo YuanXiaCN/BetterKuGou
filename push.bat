@@ -1,4 +1,5 @@
 git add .
-git commit -m "release: v0.1.1-alpha-pre4 –ﬁ∏¥±‡“ÎŒ Ã‚"
-git tag v0.1.1-alpha-pre4
-git push origin master --tags
+git commit -m "release: v0.1.4-alpha-pre1"
+git push origin HEAD
+git tag v0.1.4-alpha-pre1
+git push origin v0.1.4-alpha-pre1

@@ -114,7 +114,7 @@
           </div>
           <div class="song-info">
             <h4 class="song-name">{{ song.songname }}</h4>
-            <p class="song-artist">{{ song.singername }}</p>
+            <p class="song-artist"><span class="artist-link" @click.stop="goArtistFromAISong(song)">{{ song.singername }}</span></p>
           </div>
         </div>
       </div>
@@ -320,6 +320,12 @@ export default {
         timelen: song.duration || song.time_length || song.timelen
       }
       this.$emit('play', normalizedSong)
+    }
+    ,
+    goArtistFromAISong(song) {
+      const id = song.SingerId || song.singerid || song.AuthorId || song.author_id || null
+      const name = song.singername || song.author_name || null
+      if (id || name) this.$emit('navigate', 'artist', { id, name })
     }
   }
 }
@@ -649,4 +655,7 @@ export default {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.artist-link { cursor: pointer; }
+.artist-link:hover { color: var(--color-primary); text-decoration: underline; }
 </style>

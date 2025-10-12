@@ -5,7 +5,7 @@
       <!-- 头部 -->
       <div class="drawer-header">
         <h3>播放列表</h3>
-        <span class="song-count">共 {{ playlist.length }} 首</span>
+        <span class="song-count">共 {{ validPlaylist.length }} 首</span>
         <button class="close-btn" @click="closeDrawer">
           <svg viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor">
             <path d="M563.8 512l262.5-312.9c4.4-5.2.7-13.1-6.1-13.1h-79.8c-4.7 0-9.2 2.1-12.3 5.7L511.6 449.8 295.1 191.7c-3-3.6-7.5-5.7-12.3-5.7H203c-6.8 0-10.5 7.9-6.1 13.1L459.4 512 196.9 824.9A7.95 7.95 0 00203 838h79.8c4.7 0 9.2-2.1 12.3-5.7l216.5-258.1 216.5 258.1c3 3.6 7.5 5.7 12.3 5.7h79.8c6.8 0 10.5-7.9 6.1-13.1L563.8 512z"/>
@@ -22,16 +22,16 @@
           appear
         >
           <div 
-            v-for="(song, index) in playlist" 
-            :key="song.hash || index"
+            v-for="(song, index) in validPlaylist" 
+            :key="song.hash || song.name || `song-${index}`"
             class="playlist-item"
-            :class="{ 'active': currentSong && currentSong.hash === song.hash }"
+            :class="{ 'active': isCurrentSong(song) }"
             @dblclick="playSong(song)"
             @contextmenu.prevent.stop="showContextMenu($event, song, index)"
           >
           <!-- 播放状态指示器 -->
           <div class="play-indicator">
-            <svg v-if="currentSong && currentSong.hash === song.hash && isPlaying" 
+            <svg v-if="isCurrentSong(song) && isPlaying" 
                  viewBox="0 0 1024 1024" width="14" height="14" fill="currentColor">
               <path d="M304 176h80v672h-80zm336 0h80v672h-80z"/>
             </svg>
@@ -61,7 +61,7 @@
         </TransitionGroup>
 
         <!-- 空状态 -->
-        <div v-if="playlist.length === 0" class="empty-state">
+        <div v-if="validPlaylist.length === 0" class="empty-state">
           <svg viewBox="0 0 1024 1024" width="64" height="64" fill="currentColor" opacity="0.3">
             <path d="M880 112H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V144c0-17.7-14.3-32-32-32zm-40 728H184V184h656v656z"/>
             <path d="M304 368c0 4.4 3.6 8 8 8h384c4.4 0 8-3.6 8-8v-48c0-4.4-3.6-8-8-8H312c-4.4 0-8 3.6-8 8v48zm0 192c0 4.4 3.6 8 8 8h384c4.4 0 8-3.6 8-8v-48c0-4.4-3.6-8-8-8H312c-4.4 0-8 3.6-8 8v48zm0 192c0 4.4 3.6 8 8 8h384c4.4 0 8-3.6 8-8v-48c0-4.4-3.6-8-8-8H312c-4.4 0-8 3.6-8 8v48z"/>
@@ -78,10 +78,10 @@
           :class="{ 'confirm-delete': showClearConfirm }"
           @click="handleClearClick" 
           @mouseleave="cancelClear"
-          :disabled="playlist.length === 0"
+          :disabled="validPlaylist.length === 0"
         >
           <svg viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
-            <path d="M360 184h-8c4.4 0 8-3.6 8-8v8h304v-8c0 4.4 3.6 8 8 8h-8v72h72v-80c0-35.3-28.7-64-64-64H352c-35.3 0-64 28.7-64 64v80h72v-72zm504 72H160c-17.7 0-32 14.3-32 32v32c0 4.4 3.6 8 8 8h60.4l24.7 523c1.6 34.1 29.8 61 63.9 61h454c34.2 0 62.3-26.8 63.9-61l24.7-523H888c4.4 0 8-3.6 8-8v-32c0-17.7-14.3-32-32-32zM731.3 840H292.7l-24.2-512h487l-24.2 512z"/>
+            <path d="M360 184h-8c4.4 0 8-3.6 8-8v8h304v-8c0-4.4-3.6-8-8-8h-8v72h72v-80c0-35.3-28.7-64-64-64H352c-35.3 0-64 28.7-64 64v80h72v-72zm504 72H160c-17.7 0-32 14.3-32 32v32c0 4.4 3.6 8 8 8h60.4l24.7 523c1.6 34.1 29.8 61 63.9 61h454c34.2 0 62.3-26.8 63.9-61l24.7-523H888c4.4 0 8-3.6 8-8v-32c0-17.7-14.3-32-32-32zM731.3 840H292.7l-24.2-512h487l-24.2 512z"/>
           </svg>
           {{ showClearConfirm ? '确认清除' : '清空列表' }}
         </button>
@@ -137,6 +137,25 @@ export default {
     }
   },
   computed: {
+    // 过滤有效的播放列表项目
+    validPlaylist() {
+      if (!Array.isArray(this.playlist)) {
+        return []
+      }
+      
+      return this.playlist.filter(song => {
+        // 确保歌曲对象不为 null/undefined 且有基本字段
+        const isValid = song && 
+                       typeof song === 'object' && 
+                       (song.hash || song.name || song.filename)
+        
+        if (!isValid && song) {
+          console.log('🎵 [PlaylistDrawer] 过滤无效歌曲对象:', song)
+        }
+        return isValid
+      })
+    },
+    
     contextMenuItems() {
       if (!this.currentContextSong) return []
       
@@ -189,22 +208,62 @@ export default {
       immediate: false
     }
   },
+  watch: {
+    // 监控播放列表变化，防止出现异常数据
+    playlist: {
+      handler(newPlaylist) {
+        if (newPlaylist && !Array.isArray(newPlaylist)) {
+          console.error('🎵 [PlaylistDrawer] 播放列表不是数组:', newPlaylist)
+        }
+      },
+      immediate: true
+    },
+    // 监控当前歌曲变化
+    currentSong: {
+      handler(newCurrentSong) {
+        if (newCurrentSong && typeof newCurrentSong !== 'object') {
+          console.error('🎵 [PlaylistDrawer] 当前歌曲不是对象:', newCurrentSong)
+        }
+      },
+      immediate: true
+    }
+  },
   methods: {
     closeDrawer() {
       this.$emit('close')
     },
     
     playSong(song) {
+      console.log('🎵 [PlaylistDrawer] 用户双击播放歌曲:', {
+        songName: song.name || song.filename,
+        songHash: song.hash,
+        currentSongName: this.currentSong?.name || this.currentSong?.filename,
+        currentSongHash: this.currentSong?.hash
+      })
       this.$emit('play', song)
     },
     
     removeSong(index) {
-      this.$emit('remove', index)
+      // 找到在原始播放列表中的真实索引
+      const song = this.validPlaylist[index]
+      const realIndex = this.playlist.findIndex(s => 
+        (s.hash && song.hash && s.hash === song.hash) || 
+        (s.name && song.name && s.name === song.name)
+      )
+      
+      console.log('🎵 [PlaylistDrawer] 移除歌曲:', {
+        displayIndex: index,
+        realIndex,
+        songName: song.name,
+        songHash: song.hash
+      })
+      
+      this.$emit('remove', realIndex >= 0 ? realIndex : index)
     },
     
     // 处理清空按钮点击
     handleClearClick() {
-      if (this.playlist.length === 0) return
+      if (this.validPlaylist.length === 0) return
       
       if (!this.showClearConfirm) {
         // 第一次点击：显示确认状态
@@ -253,10 +312,10 @@ export default {
     
     // 滚动到当前播放的歌曲
     scrollToCurrentSong() {
-      if (!this.currentSong || !this.playlist.length) return
+      if (!this.currentSong || !this.validPlaylist.length) return
       
-      const currentIndex = this.playlist.findIndex(song => 
-        song.hash === this.currentSong.hash
+      const currentIndex = this.validPlaylist.findIndex(song => 
+        this.isCurrentSong(song)
       )
       
       if (currentIndex === -1) return
@@ -282,24 +341,66 @@ export default {
       }
     },
     
+    // 判断是否为当前播放的歌曲
+    isCurrentSong(song) {
+      try {
+        if (!this.currentSong || !song || typeof song !== 'object') {
+          return false
+        }
+        
+        // 如果两个对象都有 hash，优先用 hash 比较
+        if (this.currentSong.hash && song.hash) {
+          const result = this.currentSong.hash === song.hash
+          if (result) {
+            console.log('🎵 [PlaylistDrawer] Hash匹配成功:', {
+              currentHash: this.currentSong.hash,
+              songHash: song.hash,
+              currentName: this.currentSong.name || this.currentSong.filename,
+              songName: song.name || song.filename
+            })
+          }
+          return result
+        }
+        
+        // 如果 song 没有 hash（不完整的歌曲对象），跳过高亮
+        if (!song.hash) {
+          return false
+        }
+        
+        // 备用比较方式：通过名称比较（不推荐，但作为fallback）
+        if (this.currentSong.name && song.name) {
+          return this.currentSong.name === song.name
+        }
+        
+        return false
+      } catch (error) {
+        console.error('🎵 [PlaylistDrawer] isCurrentSong 错误:', error, { currentSong: this.currentSong, song })
+        return false
+      }
+    },
+    
     // 提取歌曲名称
     getSongName(song) {
-      if (!song) return '未知歌曲'
-      
-      // 优先使用 name 字段（实际数据字段）
-      const fullName = song.name || song.filename || song.songname || song.audio_name || ''
-      
-      if (!fullName) {
-        console.warn('歌曲名称字段为空，歌曲对象:', song)
+      if (!song || typeof song !== 'object') {
         return '未知歌曲'
       }
       
-      // 如果包含 " - "，提取歌名部分
-      const parts = fullName.split(' - ')
-      if (parts.length > 1) {
-        return parts.slice(1).join(' - ')
+      // 优先使用 name 字段
+      if (song.name && typeof song.name === 'string') {
+        return song.name
       }
-      return fullName
+      
+      // 备用字段
+      if (song.filename && typeof song.filename === 'string') {
+        return song.filename
+      }
+      
+      // 如果都没有，显示调试信息但不频繁打印
+      if (Math.random() < 0.1) { // 只有10%的概率打印，减少日志噪音
+        console.warn('🎵 [PlaylistDrawer] 歌曲名称字段为空，歌曲对象:', song)
+      }
+      
+      return '未知歌曲'
     },
     
     // 获取歌手名称
@@ -338,21 +439,14 @@ export default {
     },
     
     // 格式化时长
-    formatDuration(song) {
-      if (!song) return '0:00'
-      
-      // 优先使用 timelen 字段（实际数据字段，毫秒）
-      let milliseconds = song.timelen || song.duration || song.timelength || song.time || 0
-      
-      if (!milliseconds || isNaN(milliseconds)) {
-        console.warn('时长字段为空或无效，歌曲对象:', song)
+    formatDuration(duration) {
+      if (!duration || duration <= 0) {
+        console.warn('🎵 [PlaylistDrawer] 时长字段为空或无效，歌曲对象:', this.song)
         return '0:00'
       }
-      
-      const seconds = Math.floor(milliseconds / 1000)
-      const mins = Math.floor(seconds / 60)
-      const secs = seconds % 60
-      return `${mins}:${secs.toString().padStart(2, '0')}`
+      const minutes = Math.floor(duration / 60)
+      const seconds = duration % 60
+      return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`
     }
   }
 }

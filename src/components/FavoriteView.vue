@@ -50,7 +50,7 @@
         v-for="(song, index) in sortedFavoriteList" 
         :key="song.hash"
         class="song-item"
-        :class="{ playing: currentPlayingHash && currentPlayingHash === song.hash }"
+        :class="{ playing: isCurrentlyPlaying(song) }"
         @dblclick="playSong(song)"
         @contextmenu.prevent.stop="showContextMenu($event, song)"
       >
@@ -68,13 +68,17 @@
           </div>
         </div>
 
-        <div class="col-artist">{{ getSingerNames(song.singerinfo, song) || song.singername || song.author_name || (song.name && song.name.includes(' - ') ? song.name.split(' - ')[0] : '-') }}</div>
-        <div class="col-album">{{ song.albuminfo?.name || song.remark || '-' }}</div>
+        <div class="col-artist">
+          <span class="artist-link" @click.stop="goArtist(song)">
+            {{ getSingerNames(song.singerinfo, song) || song.singername || song.author_name || (song.name && song.name.includes(' - ') ? song.name.split(' - ')[0] : '-') }}
+          </span>
+        </div>
+  <div class="col-album"><span class="album-link" @click.stop="goAlbum(song)">{{ song.albuminfo?.name || song.remark || '-' }}</span></div>
         <div class="col-duration">
           {{ formatDuration(song.timelen) }}
           <div class="action-buttons">
-            <button class="icon-btn play-btn-inline" @click.stop="playSong(song)" :title="currentPlayingHash === song.hash ? '暂停' : '播放'">
-              <svg v-if="currentPlayingHash === song.hash" viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
+            <button class="icon-btn play-btn-inline" @click.stop="playSong(song)" :title="isCurrentlyPlaying(song) ? '暂停' : '播放'">
+              <svg v-if="isCurrentlyPlaying(song)" viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
                 <path d="M304 176h80v672h-80zm336 0h80v672h-80z"/>
               </svg>
               <svg v-else viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
@@ -107,6 +111,9 @@ import ContextMenu from './ContextMenu.vue'
 import contextMenuManager from '../utils/contextMenuManager.js'
 import { useSettingsStore } from '../stores/settingsStore.js'
 
+// 引入图标
+import nextplayIcon from '../icon/nextplay.svg'
+
 export default {
   name: 'FavoriteView',
   components: {
@@ -116,12 +123,6 @@ export default {
     currentSong: {
       type: Object,
       default: null
-    }
-  },
-  computed: {
-    // 安全地获取当前播放歌曲的 hash
-    currentPlayingHash() {
-      return this.currentSong?.hash || null
     }
   },
   setup() {
@@ -136,13 +137,22 @@ export default {
       contextMenuVisible: false,
       contextMenuPosition: { x: 0, y: 0 },
       currentContextSong: null,
-      sortOrder: 'none' // 排序状态: 'none', 'asc', 'desc'
+      sortOrder: 'none', // 排序状态: 'none', 'asc', 'desc'
+      isPlayingSong: false, // 防止重复播放请求
+      nextplayIcon: nextplayIcon
     }
   },
   computed: {
     // 安全地获取当前播放歌曲的 hash
     currentPlayingHash() {
-      return this.currentSong?.hash || null
+      const hash = this.currentSong?.hash || null
+      console.log('🎵 [FavoriteView] currentPlayingHash 计算:', {
+        currentSong: this.currentSong,
+        hash: hash,
+        name: this.currentSong?.name || this.currentSong?.filename,
+        timestamp: new Date().toLocaleTimeString()
+      })
+      return hash
     },
     // 计算排序后的歌曲列表
     sortedFavoriteList() {
@@ -174,7 +184,7 @@ export default {
         },
         {
           label: '下一首播放',
-          icon: 'M272.9 512l265.4-339.1c4.1-5.2.4-12.9-6.3-12.9h-77.3c-4.9 0-9.6 2.3-12.6 6.1L186.8 492.3a31.99 31.99 0 000 39.5l255.3 326.1c3 3.9 7.7 6.1 12.6 6.1H532c6.7 0 10.4-7.7 6.3-12.9L272.9 512zm304 0l265.4-339.1c4.1-5.2.4-12.9-6.3-12.9h-77.3c-4.9 0-9.6 2.3-12.6 6.1L490.8 492.3a31.99 31.99 0 000 39.5l255.3 326.1c3 3.9 7.7 6.1 12.6 6.1H836c6.7 0 10.4-7.7 6.3-12.9L576.9 512z',
+          icon: this.nextplayIcon,
           action: () => this.playNext(this.currentContextSong)
         },
         { divider: true },
@@ -207,8 +217,27 @@ export default {
       ]
     }
   },
+  watch: {
+    currentSong: {
+      handler(newSong, oldSong) {
+        // 监听当前播放歌曲的变化，用于调试
+        console.log('🎵 [FavoriteView] currentSong changed', {
+          old: oldSong ? oldSong.hash : null,
+          new: newSong ? newSong.hash : null,
+          oldName: oldSong ? oldSong.name : null,
+          newName: newSong ? newSong.name : null
+        });
+        
+        // 强制重新渲染组件，确保UI状态与数据状态保持一致
+        this.$forceUpdate()
+      },
+      deep: true
+    }
+  },
   mounted() {
     this.loadFavorites()
+    
+    console.log('🔧 [FavoriteView] 组件已挂载，isCurrentlyPlaying 方法可用:', typeof this.isCurrentlyPlaying)
     
     // 调试：监听 currentSong 变化
     this.$watch('currentSong', (newVal, oldVal) => {
@@ -219,8 +248,88 @@ export default {
         newName: newVal?.name
       })
     }, { deep: true })
+    
+    // 调试：监听 currentPlayingHash 变化
+    this.$watch('currentPlayingHash', (newVal, oldVal) => {
+      console.log('🎵 [FavoriteView] currentPlayingHash 变化:', {
+        old: oldVal,
+        new: newVal
+      })
+      // 强制触发一次重新渲染检查
+      this.$nextTick(() => {
+        if (process.env.NODE_ENV === 'development') {
+          console.log('🔄 [FavoriteView] 下一个tick，强制检查高亮状态')
+        }
+        // 检查当前播放歌曲是否在收藏列表中
+        if (this.favoriteList.length > 0) {
+          this.checkCurrentSongInFavorites()
+        }
+      })
+    })
   },
   methods: {
+    // 检查是否为当前播放歌曲（优化版本）
+    isCurrentlyPlaying(song) {
+      if (!song || !song.hash) return false
+      
+      // 优化：直接检查hash匹配，避免重复计算和大量日志
+      const hashMatch = this.currentPlayingHash === song.hash
+      const songMatch = this.currentSong?.hash === song.hash
+      const result = hashMatch || songMatch
+      
+      // 只在开发环境且找到匹配时输出日志
+      if (process.env.NODE_ENV === 'development' && result) {
+        console.log('🎯 [FavoriteView] 找到匹配的歌曲!', song.name)
+      }
+      
+      return result
+    },
+    
+    // 调试方法：检查当前播放歌曲是否在收藏列表中
+    checkCurrentSongInFavorites() {
+      if (!this.currentSong || !this.currentPlayingHash) {
+        console.log('🔍 [FavoriteView] 当前没有播放歌曲')
+        return
+      }
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔍 [FavoriteView] 检查当前播放歌曲是否在收藏列表中:')
+        console.log('  - 当前播放:', this.currentSong.name)
+        console.log('  - Hash:', this.currentPlayingHash)
+        console.log('  - 收藏列表总数:', this.favoriteList.length)
+      }
+      
+      // 按Hash查找（优化：使用缓存和更高效的查找）
+      const foundByHash = this.favoriteList.find(song => song.hash === this.currentPlayingHash)
+      if (foundByHash) {
+        if (process.env.NODE_ENV === 'development') {
+          console.log('  - ✅ 通过Hash找到:', foundByHash.name)
+        }
+        return foundByHash
+      }
+      
+      // 按歌曲名查找（模糊匹配）- 简化逻辑
+      const currentName = this.currentSong.name?.toLowerCase()
+      if (currentName) {
+        const foundByName = this.favoriteList.find(song => {
+          return song.name && song.name.toLowerCase().includes(currentName.split(' - ').pop())
+        })
+        
+        if (foundByName) {
+          if (process.env.NODE_ENV === 'development') {
+            console.log('  - 🔍 通过歌名找到可能匹配:', foundByName.name, 'Hash:', foundByName.hash)
+          }
+          return foundByName
+        }
+      }
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('  - ❌ 在收藏列表中没有找到当前播放的歌曲')
+      }
+      
+      return null
+    },
+    
     // 加载收藏列表
     async loadFavorites() {
       this.loading = true
@@ -365,33 +474,50 @@ export default {
     
     // 播放歌曲
     playSong(song) {
-      console.log('[FavoriteView] playSong 调用:', song.name)
-      console.log('[FavoriteView] 当前 currentSong:', this.currentSong?.name)
-      console.log('[FavoriteView] 当前 currentPlayingHash:', this.currentPlayingHash)
-      console.log('[FavoriteView] 歌曲 hash:', song.hash)
-      console.log('设置 - enqueueFullPlaylist:', this.settings?.playback?.enqueueFullPlaylist)
+      // 防止重复快速点击
+      if (this.isPlayingSong) {
+        console.log('[FavoriteView] 正在处理播放请求，忽略重复操作')
+        return
+      }
       
-      // 检查是否开启了"自动将全部歌单歌曲加入播放列表"功能
-      if (this.settings?.playback?.enqueueFullPlaylist && this.favoriteList.length > 0) {
-        console.log('自动加入全部歌曲到播放列表')
-        // 找到当前歌曲在列表中的索引
-        const songIndex = this.favoriteList.findIndex(s => s.hash === song.hash)
+      this.isPlayingSong = true
+      
+      try {
+        console.log('[FavoriteView] playSong 调用:', song.name)
+        console.log('[FavoriteView] 当前 currentSong:', this.currentSong?.name)
+        console.log('[FavoriteView] 当前 currentPlayingHash:', this.currentPlayingHash)
+        console.log('[FavoriteView] 歌曲 hash:', song.hash)
+        console.log('设置 - enqueueFullPlaylist:', this.settings?.playback?.enqueueFullPlaylist)
         
-        if (songIndex !== -1) {
-          // 重新排列歌单,让当前歌曲排在第一位
-          const reorderedList = [
-            song,
-            ...this.favoriteList.slice(0, songIndex),
-            ...this.favoriteList.slice(songIndex + 1)
-          ]
-          this.$emit('play-all', reorderedList)
+        // 检查是否开启了"自动将全部歌单歌曲加入播放列表"功能
+        if (this.settings?.playback?.enqueueFullPlaylist && this.favoriteList.length > 0) {
+          console.log('自动加入全部歌曲到播放列表')
+          // 找到当前歌曲在列表中的索引
+          const songIndex = this.favoriteList.findIndex(s => s.hash === song.hash)
+          
+          if (songIndex !== -1) {
+            // 重新排列歌单,让当前歌曲排在第一位
+            const reorderedList = [
+              song,
+              ...this.favoriteList.slice(0, songIndex),
+              ...this.favoriteList.slice(songIndex + 1)
+            ]
+            this.$emit('play-all', reorderedList)
+          } else {
+            // 如果找不到,就正常播放全部
+            this.$emit('play-all', this.favoriteList)
+          }
         } else {
-          // 如果找不到,就正常播放全部
-          this.$emit('play-all', this.favoriteList)
+          // 只播放单曲
+          this.$emit('play', song)
         }
-      } else {
-        // 只播放单曲
-        this.$emit('play', song)
+      } catch (error) {
+        console.error('[FavoriteView] playSong 错误:', error)
+      } finally {
+        // 延迟重置标志，防止快速点击
+        setTimeout(() => {
+          this.isPlayingSong = false
+        }, 500)
       }
     },
     
@@ -502,6 +628,52 @@ export default {
     // 去发现页面
     goToDiscover() {
       this.$emit('navigate', 'home')
+    },
+
+    // 进入歌手页面
+    goArtist(song) {
+      const id = this.getPrimaryArtistId(song)
+      const name = this.getPrimaryArtistName(song)
+      this.$emit('navigate', 'artist', { id, name })
+    },
+    // 进入专辑页面
+    goAlbum(song) {
+      const id =
+        song.album_id ||
+        song.albumid ||
+        song.AlbumID ||
+        song.base?.album_id ||
+        song.album_info?.album_id ||
+        song.album_info?.id ||
+        null
+      const name = song.albuminfo?.name || song.album_name || song.remark || song.album_info?.album_name || null
+      if (id || name) this.$emit('navigate', 'album', { id, name })
+    },
+
+    // 提取首个歌手ID
+    getPrimaryArtistId(song) {
+      const s = song || {}
+      if (s.SingerId || s.singerid || s.AuthorId || s.author_id) return s.SingerId || s.singerid || s.AuthorId || s.author_id
+      if (Array.isArray(s.singerinfo) && s.singerinfo.length) {
+        const first = s.singerinfo[0]
+        return first?.id || first?.singerid || first?.author_id || null
+      }
+      return null
+    },
+
+    // 提取首个歌手名
+    getPrimaryArtistName(song) {
+      const s = song || {}
+      if (s.SingerName || s.singername || s.author_name) return s.SingerName || s.singername || s.author_name
+      if (Array.isArray(s.singerinfo) && s.singerinfo.length) {
+        const first = s.singerinfo[0]
+        return first?.name || first?.singer_name || first?.singername || first?.author_name || null
+      }
+      // 从 "歌手 - 歌名" 中分离
+      if (typeof s.name === 'string' && s.name.includes(' - ')) {
+        return s.name.split(' - ')[0]
+      }
+      return null
     },
     
     // 切换排序顺序
@@ -747,6 +919,11 @@ export default {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.artist-link { cursor: pointer; }
+.artist-link:hover { color: var(--color-primary); text-decoration: underline; }
+.album-link { cursor: pointer; }
+.album-link:hover { color: var(--color-primary); text-decoration: underline; }
 
 .col-duration {
   color: var(--color-text-tertiary);

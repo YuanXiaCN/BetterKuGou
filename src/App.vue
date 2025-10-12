@@ -10,12 +10,21 @@ import MusicPlayer from './components/MusicPlayer.vue'
 import PersonalFMView from './components/PersonalFMView.vue'
 import DailyRecommendView from './components/DailyRecommendView.vue'
 import RankDetailView from './components/RankDetailView.vue'
+import SearchView from './components/SearchView.vue'
+import ArtistView from './components/ArtistView.vue'
+import AlbumDetailView from './components/AlbumDetailView.vue'
 import { getLoginInfo, isLoggedIn } from './api/auth.js'
 import { getUserPlaylists } from './api/music.js'
 import { useSettingsStore } from './stores/settingsStore.js'
 import { cloneDeep } from './utils/objectUtils.js'
 
 console.log('App.vue loaded')
+
+// 全局错误处理
+const handleGlobalError = (error, info) => {
+  console.error('全局错误:', error, info)
+  // 这里可以添加错误报告或用户提示
+}
 
 // 控制显示登录界面
 const showLogin = ref(false)
@@ -32,6 +41,14 @@ const currentView = ref('home')
 
 // 排行榜数据（用于传递给RankDetailView）
 const rankData = ref(null)
+// 歌手页面数据
+const artistData = ref(null)
+// 专辑页面数据
+const albumData = ref(null)
+
+// 搜索数据
+const searchQuery = ref('')
+const searchResults = ref(null)
 
 // 用户歌单列表（TODO: 从API获取）
 const userPlaylists = ref([
@@ -149,6 +166,11 @@ const handleNavigate = (view, data) => {
   // 如果是排行榜详情，保存排行榜数据
   if (view === 'rank' && data) {
     rankData.value = data
+  } else if (view === 'artist' && data) {
+    // data 结构 { id?, name? }
+    artistData.value = data
+  } else if (view === 'album' && data) {
+    albumData.value = data
   }
 }
 
@@ -175,18 +197,54 @@ const handlePlay = (song) => {
   }
 }
 
-// 处理播放全部
-const handlePlayAll = (songs) => {
-  console.log('Play all songs:', songs)
-  if (songs && songs.length > 0) {
-    // 清空当前播放列表
-    playlist.value = []
-    // 添加所有歌曲到播放列表
-    playlist.value = [...songs]
-    playlistIndex.value = 0
-    // 播放第一首歌
-    currentSong.value = songs[0]
-    console.log('已添加', songs.length, '首歌曲到播放列表')
+// 处理播放所有歌曲
+const handlePlayAll = async (songs) => {
+  if (process.env.NODE_ENV === 'development') {
+    console.log('Play all songs:', songs)
+  }
+  
+  if (!songs || !Array.isArray(songs) || songs.length === 0) {
+    console.warn('无效的歌曲列表:', songs)
+    return
+  }
+  
+  try {
+    // 使用批量更新策略，避免频繁的响应式更新
+    const batch = async () => {
+      // 分批添加歌曲，避免一次性处理大量数据导致UI卡顿
+      const batchSize = 100
+      const batches = []
+      for (let i = 0; i < songs.length; i += batchSize) {
+        batches.push(songs.slice(i, i + batchSize))
+      }
+      
+      // 先添加第一批歌曲并开始播放（避免先清空导致播放器重置）
+      if (batches.length > 0) {
+        // 直接设置第一批歌曲，不先清空
+        playlist.value = [...batches[0]]
+        playlistIndex.value = 0
+        currentSong.value = songs[0]
+        
+        // 等待第一首歌曲开始加载
+        await nextTick()
+        
+        // 异步添加剩余批次
+        if (batches.length > 1) {
+          for (let i = 1; i < batches.length; i++) {
+            await nextTick() // 每批之间给UI更新的机会
+            playlist.value = [...playlist.value, ...batches[i]]
+          }
+        }
+      }
+    }
+    
+    await batch()
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log('已添加', songs.length, '首歌曲到播放列表')
+    }
+  } catch (error) {
+    console.error('处理播放所有歌曲时出错:', error)
   }
 }
 
@@ -210,8 +268,37 @@ const handleRemoveFromPlaylist = (song) => {
 // 处理搜索歌曲
 const handleSearch = (song) => {
   console.log('搜索歌曲:', song)
-  // TODO: 实现搜索功能
-  alert(`搜索功能开发中...\n歌曲: ${song.name}`)
+  
+  // 构造搜索关键词：优先使用歌曲名，如果没有则使用文件名
+  const songName = song.name || song.filename || song.audio_name || song.songname
+  const artistName = song.singername || (song.singerinfo && song.singerinfo.length > 0 ? song.singerinfo[0].singername : '')
+  
+  // 构造搜索词：歌曲名 + 歌手名
+  let searchKeyword = songName
+  if (artistName) {
+    searchKeyword += ` ${artistName}`
+  }
+  
+  if (searchKeyword.trim()) {
+    // 调用搜索请求处理函数
+    handleSearchRequest(searchKeyword.trim())
+  } else {
+    console.warn('无法构造搜索关键词，歌曲信息不完整')
+    alert('无法搜索：歌曲信息不完整')
+  }
+}
+
+// 处理搜索请求
+const handleSearchRequest = async (keywords) => {
+  console.log('执行搜索:', keywords)
+  try {
+    searchQuery.value = keywords
+    currentView.value = 'search'
+    // 这里暂时不直接调用搜索API，而是在SearchView组件中处理
+  } catch (error) {
+    console.error('搜索失败:', error)
+    alert('搜索失败，请稍后重试')
+  }
 }
 
 // 处理清空播放列表
@@ -249,10 +336,24 @@ let isRestoringSession = false
 // 歌词界面显示状态
 const isLyricViewVisible = ref(false)
 
+// 自动全屏歌词相关状态
+const autoLyricTimer = ref(null)
+const lastUserActivity = ref(Date.now())
+const AUTO_LYRIC_DELAY = 60 * 1000 // 60秒
+
 // 处理歌词界面显示状态变化
-const handleLyricViewChanged = (visible) => {
-  console.log('🎵 歌词界面状态变化:', visible)
-  isLyricViewVisible.value = visible
+const handleLyricViewChanged = (isVisible) => {
+  console.log('🎵 [App.vue] handleLyricViewChanged - 歌词界面状态变化:', isVisible)
+  isLyricViewVisible.value = isVisible
+  
+  // 如果用户手动切换歌词界面，重置自动全屏计时器
+  if (!isVisible && settings.playback?.fullscreenLyrics && currentSong.value) {
+    console.log('🎵 [App.vue] 用户关闭歌词界面，重置自动全屏计时器')
+    resetAutoLyricTimer()
+  } else if (isVisible) {
+    // 如果用户进入歌词界面，暂停自动全屏计时器
+    clearAutoLyricTimer()
+  }
 }
 
 // 播放上一曲（由 MusicPlayer 组件内部处理）
@@ -271,14 +372,78 @@ const handleNext = () => {
 const handleSongChanged = (song) => {
   console.log('🎵 [App.vue] handleSongChanged - 歌曲已切换:', song.name || song.filename)
   console.log('🎵 [App.vue] 歌曲 hash:', song.hash)
-  currentSong.value = song
+  // 避免对相同歌曲重复赋值，减少不必要的触发
+  if (!currentSong.value || currentSong.value.hash !== song.hash) {
+    currentSong.value = song
+  }
   // 同时更新播放列表索引
   const index = playlist.value.findIndex(s => s.hash === song.hash)
   if (index !== -1) {
     playlistIndex.value = index
   }
-  if (settings.playback?.fullscreenLyrics && musicPlayerRef.value?.showLyrics) {
-    musicPlayerRef.value.showLyrics()
+  
+  // 🔧 新的智能自动全屏逻辑：
+  // - 如果用户已经在歌词界面，保持在歌词界面
+  // - 如果用户没在歌词界面且开启了自动全屏，重置60秒计时器
+  if (!isLyricViewVisible.value && settings.playback?.fullscreenLyrics) {
+    resetAutoLyricTimer()
+  }
+  
+  if (process.env.NODE_ENV === 'development') {
+    console.log('🎵 [App.vue] 切歌完成，歌词界面策略:', {
+      isLyricViewVisible: isLyricViewVisible.value,
+      fullscreenLyricsEnabled: settings.playback?.fullscreenLyrics,
+      action: isLyricViewVisible.value ? '保持显示' : '启动自动全屏计时器'
+    })
+  }
+}
+
+// 更新用户活动时间戳并重置计时器
+const updateUserActivity = () => {
+  lastUserActivity.value = Date.now()
+  
+  // 如果开启了自动全屏且有歌曲播放，重置计时器
+  if (settings.playback?.fullscreenLyrics && currentSong.value && !isLyricViewVisible.value) {
+    resetAutoLyricTimer()
+  }
+}
+
+// 自动全屏计时器管理
+const startAutoLyricTimer = () => {
+  clearAutoLyricTimer()
+  
+  console.log('🎵 [App.vue] 启动自动全屏计时器，60秒后进入全屏歌词')
+  autoLyricTimer.value = setTimeout(() => {
+    // 检查是否满足自动全屏条件
+    if (settings.playback?.fullscreenLyrics && 
+        currentSong.value && 
+        !isLyricViewVisible.value &&
+        musicPlayerRef.value?.isPlaying) {
+      
+      console.log('🎵 [App.vue] 60秒无操作，自动进入全屏歌词')
+      musicPlayerRef.value?.showLyrics()
+    }
+  }, AUTO_LYRIC_DELAY)
+}
+
+const clearAutoLyricTimer = () => {
+  if (autoLyricTimer.value) {
+    console.log('🎵 [App.vue] 清除自动全屏计时器')
+    clearTimeout(autoLyricTimer.value)
+    autoLyricTimer.value = null
+  }
+}
+
+const resetAutoLyricTimer = () => {
+  // 只在满足条件时才重置计时器
+  if (settings.playback?.fullscreenLyrics && 
+      currentSong.value && 
+      !isLyricViewVisible.value) {
+    
+    console.log('🎵 [App.vue] 重置自动全屏计时器')
+    startAutoLyricTimer()
+  } else {
+    clearAutoLyricTimer()
   }
 }
 
@@ -501,6 +666,12 @@ onMounted(() => {
   // 添加快捷键监听
   document.addEventListener('keydown', handleKeyDown)
   
+  // 添加用户活动检测监听器
+  const activityEvents = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart']
+  activityEvents.forEach(eventType => {
+    document.addEventListener(eventType, updateUserActivity, { passive: true })
+  })
+  
   // 注册全局快捷键
   if (settingsReady.value) {
     registerGlobalShortcuts()
@@ -521,6 +692,15 @@ onMounted(() => {
 onBeforeUnmount(() => {
   // 移除快捷键监听
   document.removeEventListener('keydown', handleKeyDown)
+  
+  // 移除用户活动检测监听器
+  const activityEvents = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart']
+  activityEvents.forEach(eventType => {
+    document.removeEventListener(eventType, updateUserActivity, { passive: true })
+  })
+  
+  // 清除自动全屏计时器
+  clearAutoLyricTimer()
   
   // 注销所有全局快捷键
   unregisterAllGlobalShortcuts()
@@ -863,6 +1043,7 @@ function performMemoryCleanup() {
       @show-login="handleShowLogin"
       @logout="handleLogout"
       @open-settings="handleShowSettings"
+      @search="handleSearchRequest"
       :userLoggedIn="userLoggedIn"
       :userInfo="userInfo"
       :isLyricViewVisible="isLyricViewVisible"
@@ -946,6 +1127,38 @@ function performMemoryCleanup() {
               />
             </div>
             
+            <!-- 搜索结果视图 -->
+            <div v-else-if="currentView === 'search'" class="view-search">
+              <SearchView 
+                :search-keyword="searchQuery"
+                :current-song="currentSong"
+                @navigate="handleNavigate"
+                @play="handlePlay"
+                @play-all="handlePlayAll"
+                @play-next="handlePlayNext"
+              />
+            </div>
+            
+            <!-- 歌手页面视图 -->
+            <div v-else-if="currentView === 'artist' && artistData" class="view-artist">
+              <ArtistView 
+                :artist-id="artistData?.id"
+                :artist-name="artistData?.name"
+                @play="handlePlay"
+                @navigate="handleNavigate"
+              />
+            </div>
+
+            <!-- 专辑详情视图 -->
+            <div v-else-if="currentView === 'album' && albumData" class="view-album">
+              <AlbumDetailView 
+                :album-id="albumData?.id"
+                :album-name="albumData?.name"
+                @navigate="handleNavigate"
+                @play="handlePlay"
+              />
+            </div>
+            
             <!-- 歌单视图（仅登录后可访问）-->
             <div v-else-if="currentView === 'playlist' && userLoggedIn" class="view-playlist">
               <h1>歌单详情</h1>
@@ -971,7 +1184,7 @@ function performMemoryCleanup() {
     <!-- 全局音乐播放器 -->
     <Transition name="player-slide">
       <MusicPlayer 
-        v-if="currentSong"
+        v-if="currentSong && typeof currentSong === 'object' && Array.isArray(playlist)"
         ref="musicPlayerRef"
         :song="currentSong"
         :playlist="playlist"
